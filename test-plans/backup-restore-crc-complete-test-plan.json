@@ -1,0 +1,54 @@
+{
+  "description": "Backup/Restore Complete Test Matrix - CRC/Small Cluster (10 workspaces per test)",
+  "tests": [],
+  "custom_tests": [
+    {
+      "name": "backup_10_single_ns_external_correct",
+      "args": "--mode binary --max-vus 10 --max-devworkspaces 10 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 600 --test-duration-minutes 10 --run-backup-test-hook true --dwoc-config-type correct --registry-path quay.io/rohan.kanojia --registry-secret quay-push-secret --backup-wait-minutes 15",
+      "enabled": true,
+      "description": "Single namespace + External registry (quay.io) + Correct config"
+    },
+    {
+      "name": "backup_10_single_ns_external_incorrect",
+      "args": "--mode binary --max-vus 10 --max-devworkspaces 10 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 600 --test-duration-minutes 10 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path quay.io/rohan.kanojia --registry-secret quay-push-secret --backup-wait-minutes 15",
+      "enabled": true,
+      "description": "Single namespace + External registry (quay.io) + Incorrect config (typo)"
+    },
+    {
+      "name": "backup_10_single_ns_internal_correct",
+      "args": "--mode binary --max-vus 10 --max-devworkspaces 10 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 600 --test-duration-minutes 10 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"\" --registry-secret \"\" --backup-wait-minutes 15",
+      "enabled": true,
+      "description": "Single namespace + OpenShift internal registry + Correct config (auto-detect)"
+    },
+    {
+      "name": "backup_10_single_ns_internal_incorrect",
+      "args": "--mode binary --max-vus 10 --max-devworkspaces 10 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 600 --test-duration-minutes 10 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path non-existent-registry.openshift-image-registry.svc:9999 --registry-secret \"\" --backup-wait-minutes 15",
+      "enabled": true,
+      "description": "Single namespace + OpenShift internal registry + Incorrect config (invalid registry)"
+    },
+    {
+      "name": "backup_10_separate_ns_external_correct",
+      "args": "--mode binary --max-vus 10 --max-devworkspaces 10 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 600 --test-duration-minutes 10 --run-backup-test-hook true --dwoc-config-type correct --registry-path quay.io/rohan.kanojia --registry-secret quay-push-secret --backup-wait-minutes 15",
+      "enabled": true,
+      "description": "Separate namespaces + External registry (quay.io) + Correct config"
+    },
+    {
+      "name": "backup_10_separate_ns_external_incorrect",
+      "args": "--mode binary --max-vus 10 --max-devworkspaces 10 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 600 --test-duration-minutes 10 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path quay.io/rohan.kanojia --registry-secret quay-push-secret --backup-wait-minutes 15",
+      "enabled": true,
+      "description": "Separate namespaces + External registry (quay.io) + Incorrect config (typo)"
+    },
+    {
+      "name": "backup_10_separate_ns_internal_correct",
+      "args": "--mode binary --max-vus 10 --max-devworkspaces 10 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 600 --test-duration-minutes 10 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"\" --registry-secret \"\" --backup-wait-minutes 15",
+      "enabled": true,
+      "description": "Separate namespaces + OpenShift internal registry + Correct config (auto-detect)"
+    },
+    {
+      "name": "backup_10_separate_ns_internal_incorrect",
+      "args": "--mode binary --max-vus 10 --max-devworkspaces 10 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 600 --test-duration-minutes 10 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path non-existent-registry.openshift-image-registry.svc:9999 --registry-secret \"\" --backup-wait-minutes 15",
+      "enabled": true,
+      "description": "Separate namespaces + OpenShift internal registry + Incorrect config (invalid registry)"
+    }
+  ]
+}
