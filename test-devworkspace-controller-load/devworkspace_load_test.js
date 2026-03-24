@@ -148,6 +148,13 @@ const etcdPodRestarts = new Gauge('etcd_pod_restarts_total');
 const maxCpuMillicores = 250;
 const maxMemoryBytes = 200 * 1024 * 1024;
 
+// Cache for running DevWorkspace count to avoid excessive API calls at scale
+let runningDevWorkspaceCountCache = {
+  count: 0,
+  lastUpdated: 0,
+  cacheDurationMs: 30000, // Cache for 30 seconds
+};
+
 export function setup() {
   const clusterInfo = detectClusterType(apiServer, headers);
   ETCD_NAMESPACE = clusterInfo.etcdNamespace;
@@ -164,23 +171,43 @@ export default function () {
   const iteration = __ITER;
 
   // In ramping-vus mode, use iteration count to enforce max limit
-  // This is much more efficient than querying the API every time
   if (maxDevWorkspaces > 0 && executorMode === 'ramping-vus') {
     const totalIterations = scenario.iterationInTest;
+
+    // Hard cap at 3000 iterations to prevent runaway creation if DevWorkspaces are stuck/failing
+    const hardIterationCap = 3000;
+    if (totalIterations >= hardIterationCap) {
+      console.log(`[Hard Cap] Reached hard iteration limit of ${hardIterationCap}, stopping creation`);
+      return;
+    }
+
     if (totalIterations >= maxDevWorkspaces) {
       // Check if running DevWorkspaces have also reached the limit
-      const result = getDevWorkspacesFromApiServer(apiServer, loadTestNamespace, headers, useSeparateNamespaces);
+      // Use cached count to avoid excessive API calls at scale (2000+ DevWorkspaces)
+      const now = Date.now();
+      const cacheAge = now - runningDevWorkspaceCountCache.lastUpdated;
 
-      if (!result.error && result.devWorkspaces) {
-        const runningCount = result.devWorkspaces.filter(dw => {
-          const phase = dw?.status?.phase;
-          return phase === 'Running' || phase === 'Ready';
-        }).length;
+      if (cacheAge > runningDevWorkspaceCountCache.cacheDurationMs) {
+        // Cache is stale, refresh it
+        const result = getDevWorkspacesFromApiServer(apiServer, loadTestNamespace, headers, useSeparateNamespaces);
 
-        if (runningCount >= maxDevWorkspaces) {
-          // Max iterations reached and running DevWorkspaces also reached max limit
-          return;
+        if (!result.error && result.devWorkspaces) {
+          const runningCount = result.devWorkspaces.filter(dw => {
+            const phase = dw?.status?.phase;
+            return phase === 'Running' || phase === 'Ready';
+          }).length;
+
+          runningDevWorkspaceCountCache.count = runningCount;
+          runningDevWorkspaceCountCache.lastUpdated = now;
+
+          console.log(`[Cache Update] Total iterations: ${totalIterations}, Running/Ready DevWorkspaces: ${runningCount}/${maxDevWorkspaces}`);
         }
+      }
+
+      // Use cached count to decide whether to skip creation
+      if (runningDevWorkspaceCountCache.count >= maxDevWorkspaces) {
+        // Max running DevWorkspaces reached, skip creation
+        return;
       }
     }
   }
