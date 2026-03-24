@@ -168,8 +168,20 @@ export default function () {
   if (maxDevWorkspaces > 0 && executorMode === 'ramping-vus') {
     const totalIterations = scenario.iterationInTest;
     if (totalIterations >= maxDevWorkspaces) {
-      // Max iterations reached, skip this creation
-      return;
+      // Check if running DevWorkspaces have also reached the limit
+      const result = getDevWorkspacesFromApiServer(apiServer, loadTestNamespace, headers, useSeparateNamespaces);
+
+      if (!result.error && result.devWorkspaces) {
+        const runningCount = result.devWorkspaces.filter(dw => {
+          const phase = dw?.status?.phase;
+          return phase === 'Running' || phase === 'Ready';
+        }).length;
+
+        if (runningCount >= maxDevWorkspaces) {
+          // Max iterations reached and running DevWorkspaces also reached max limit
+          return;
+        }
+      }
     }
   }
   const crName = `dw-test-${vuId}-${iteration}`;
