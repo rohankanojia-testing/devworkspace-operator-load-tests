@@ -536,7 +536,6 @@ add_test() {
     # Construct ARGS automatically
     local TIMEOUT_SECONDS=$((DURATION * 60))
     local ARGS="--mode binary \
-                --max-vus 300 \
                 --create-automount-resources true \
                 --max-devworkspaces $MAX \
                 --delete-devworkspace-after-ready false \
@@ -654,7 +653,6 @@ execute_tests_from_json() {
         # Construct ARGS
         local timeout_seconds=$((duration * 60))
         local args="--mode binary \
-                    --max-vus 300 \
                     --create-automount-resources true \
                     --max-devworkspaces $max \
                     --delete-devworkspace-after-ready false \
