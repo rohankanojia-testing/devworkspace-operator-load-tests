@@ -118,6 +118,7 @@ export const options = {
   thresholds: {
     'checks': ['rate>0.95'],
     'devworkspace_create_duration': ['p(95)<15000'],
+    'devworkspace_create_failed': ['count<50'],
     'devworkspace_delete_duration': ['p(95)<10000'],
     'devworkspace_ready_duration': ['p(95)<60000'],
     'devworkspace_ready_failed': ['count<5'],
@@ -130,6 +131,7 @@ export const options = {
 };
 
 const devworkspaceCreateDuration = new Trend('devworkspace_create_duration');
+const devworkspaceCreateFailed = new Counter('devworkspace_create_failed');
 const devworkspaceReady = new Counter('devworkspace_ready');
 const devworkspaceDeleteDuration = new Trend('devworkspace_delete_duration');
 const devworkspaceReadyDuration = new Trend('devworkspace_ready_duration');
@@ -278,6 +280,7 @@ function createNewDevWorkspace(namespace, vuId, iteration) {
 
   if (createRes.status !== 201 && createRes.status !== 409) {
     console.error(`[VU ${vuId}] Failed to create DevWorkspace: ${createRes.status}, ${createRes.body}`);
+    devworkspaceCreateFailed.add(1);
     return false;
   }
   devworkspaceCreateDuration.add(Date.now() - createStart);
