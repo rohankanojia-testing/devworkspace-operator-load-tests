@@ -13,7 +13,7 @@
 #
 # ENVIRONMENT VARIABLES:
 #   OPERATOR_NAMESPACE      - Namespace for operator (default: openshift-operators)
-#   ROLLOUT_TIMEOUT         - Timeout for rollout in seconds (default: 90)
+#   POD_READY_TIMEOUT       - Timeout for pod ready in seconds (default: 90)
 #
 # ============================================================================
 
@@ -22,7 +22,7 @@ set -o pipefail
 
 # --- Configuration ---
 OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-openshift-operators}"
-ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-90}"
+POD_READY_TIMEOUT="${POD_READY_TIMEOUT:-90}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -53,55 +53,55 @@ echo "Operator Namespace: $OPERATOR_NAMESPACE"
 echo "--------------------------------------------------------"
 echo ""
 
-# Step 1: Restart devworkspace-controller-manager
-log_info "Restarting devworkspace-controller-manager..."
-if oc rollout restart deployment devworkspace-controller-manager -n "$OPERATOR_NAMESPACE"; then
-    log_success "Rollout restart triggered for devworkspace-controller-manager"
+# Step 1: Delete devworkspace-controller-manager pod
+log_info "Deleting devworkspace-controller-manager pod..."
+if kubectl delete pod -n "$OPERATOR_NAMESPACE" -l app.kubernetes.io/name=devworkspace-controller --ignore-not-found=true; then
+    log_success "devworkspace-controller-manager pod deleted"
 else
-    log_error "Failed to restart devworkspace-controller-manager"
+    log_error "Failed to delete devworkspace-controller-manager pod"
     exit 1
 fi
 
 echo ""
 
-# Step 2: Restart devworkspace-webhook-server
-log_info "Restarting devworkspace-webhook-server..."
-if oc rollout restart deployment devworkspace-webhook-server -n "$OPERATOR_NAMESPACE"; then
-    log_success "Rollout restart triggered for devworkspace-webhook-server"
+# Step 2: Delete devworkspace-webhook-server pod
+log_info "Deleting devworkspace-webhook-server pod..."
+if kubectl delete pod -n "$OPERATOR_NAMESPACE" -l app.kubernetes.io/name=devworkspace-webhook-server --ignore-not-found=true; then
+    log_success "devworkspace-webhook-server pod deleted"
 else
-    log_error "Failed to restart devworkspace-webhook-server"
+    log_error "Failed to delete devworkspace-webhook-server pod"
     exit 1
 fi
 
 echo ""
 
-# Step 3: Wait for rollouts to complete
-log_info "Waiting for rollouts to complete..."
+# Step 3: Wait for pods to be ready
+log_info "Waiting for pods to be ready..."
 echo ""
 
-log_info "Waiting for devworkspace-controller-manager..."
-if oc rollout status deployment devworkspace-controller-manager -n "$OPERATOR_NAMESPACE" --timeout "${ROLLOUT_TIMEOUT}s"; then
-    log_success "devworkspace-controller-manager is ready"
+log_info "Waiting for devworkspace-controller-manager pod to be ready..."
+if kubectl wait --for=condition=ready pod -n "$OPERATOR_NAMESPACE" -l app.kubernetes.io/name=devworkspace-controller --timeout="${POD_READY_TIMEOUT}s"; then
+    log_success "devworkspace-controller-manager pod is ready"
 else
-    log_error "devworkspace-controller-manager rollout failed"
+    log_error "devworkspace-controller-manager pod failed to become ready"
     exit 1
 fi
 
 echo ""
-log_info "Waiting for devworkspace-webhook-server..."
-if oc rollout status deployment devworkspace-webhook-server -n "$OPERATOR_NAMESPACE" --timeout "${ROLLOUT_TIMEOUT}s"; then
-    log_success "devworkspace-webhook-server is ready"
+log_info "Waiting for devworkspace-webhook-server pod to be ready..."
+if kubectl wait --for=condition=ready pod -n "$OPERATOR_NAMESPACE" -l app.kubernetes.io/name=devworkspace-webhook-server --timeout="${POD_READY_TIMEOUT}s"; then
+    log_success "devworkspace-webhook-server pod is ready"
 else
-    log_error "devworkspace-webhook-server rollout failed"
+    log_error "devworkspace-webhook-server pod failed to become ready"
     exit 1
 fi
 
 log_success "DWO controllers restarted successfully"
 echo ""
 
-# Step 4: Show deployment status
-log_info "Current deployment status:"
-oc get deployment -n "$OPERATOR_NAMESPACE" -l app.kubernetes.io/part-of=devworkspace-operator
+# Step 4: Show pod status
+log_info "Current pod status:"
+kubectl get pods -n "$OPERATOR_NAMESPACE" -l app.kubernetes.io/part-of=devworkspace-operator
 
 echo ""
 echo "========================================================"
