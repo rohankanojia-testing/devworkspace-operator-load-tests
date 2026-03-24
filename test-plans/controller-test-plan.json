@@ -46,8 +46,8 @@
     {
       "max_devworkspaces": 2500,
       "mode": "separate",
-      "duration_minutes": 90,
-      "enabled": false,
+      "duration_minutes": 150,
+      "enabled": true,
       "description": "2500 DevWorkspaces in separate namespaces"
     }
   ],
