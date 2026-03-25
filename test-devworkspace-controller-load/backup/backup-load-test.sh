@@ -8,8 +8,8 @@
 # 3. Run backup monitoring
 # 4. Cleanup all resources
 #
-# Usage: ./backup-load-test.sh <max_devworkspaces> <backup_monitor_duration> <namespace> <dwo_namespace> <registry_path> <registry_secret> <dwoc_config_type> <separate_namespaces> [backup_schedule]
-# Example: ./backup-load-test.sh 15 30 loadtest-devworkspaces openshift-operators quay.io/rokumar quay-push-secret correct false "*/2 * * * *"
+# Usage: ./backup-load-test.sh <max_devworkspaces> <backup_monitor_duration> <namespace> <dwo_namespace> <registry_path> <registry_secret> <dwoc_config_type> <separate_namespaces> [backup_schedule] [verify_restore] [max_restore_samples] [wait_for_ready] [wait_timeout]
+# Example: ./backup-load-test.sh 15 30 loadtest-devworkspaces openshift-operators quay.io/rokumar quay-push-secret correct false "*/2 * * * *" true 10 true 30
 
 set -euo pipefail
 
@@ -25,6 +25,10 @@ REGISTRY_SECRET=${6:-quay-push-secret}
 DWOC_CONFIG_TYPE=${7:-correct}
 SEPARATE_NAMESPACE=${8:-false}
 BACKUP_SCHEDULE="${9:-*/2 * * * *}"
+VERIFY_RESTORE="${10:-true}"
+MAX_RESTORE_SAMPLES="${11:-10}"
+WAIT_FOR_READY="${12:-true}"
+WAIT_TIMEOUT="${13:-30}"
 
 echo "========================================"
 echo "Backup Load Testing"
@@ -38,6 +42,10 @@ echo "Registry Secret: $REGISTRY_SECRET"
 echo "DWOC Config Type: $DWOC_CONFIG_TYPE"
 echo "Separate Namespaces: $SEPARATE_NAMESPACE"
 echo "Backup Schedule: $BACKUP_SCHEDULE"
+echo "Verify Restore: $VERIFY_RESTORE"
+echo "Max Restore Samples: $MAX_RESTORE_SAMPLES"
+echo "Wait for Ready: $WAIT_FOR_READY"
+echo "Wait Timeout: ${WAIT_TIMEOUT} minutes"
 echo "========================================"
 echo ""
 
@@ -98,7 +106,11 @@ bash "${SCRIPT_DIR}/run-backup-load-test.sh" \
   --separate-namespaces "${SEPARATE_NAMESPACE}" \
   --backup-monitor-duration "${BACKUP_MONITOR_DURATION}" \
   --dwo-namespace "${DWO_NAMESPACE}" \
-  --dwoc-config-type "${DWOC_CONFIG_TYPE}"
+  --dwoc-config-type "${DWOC_CONFIG_TYPE}" \
+  --verify-restore "${VERIFY_RESTORE}" \
+  --max-restore-samples "${MAX_RESTORE_SAMPLES}" \
+  --wait-for-ready "${WAIT_FOR_READY}" \
+  --wait-timeout "${WAIT_TIMEOUT}"
 
 BACKUP_EXIT_CODE=$?
 echo ""

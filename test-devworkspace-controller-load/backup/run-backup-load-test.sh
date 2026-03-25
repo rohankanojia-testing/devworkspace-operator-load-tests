@@ -32,6 +32,8 @@ SEPARATE_NAMESPACES="false"
 BACKUP_MONITOR_DURATION_MINUTES="30"
 VERIFY_RESTORE="true"  # Enable restore verification by default
 MAX_RESTORE_SAMPLES="10"  # Number of workspaces to restore for verification
+WAIT_FOR_READY="true"  # Wait for ALL DevWorkspaces to be ready before starting backup
+WAIT_TIMEOUT_MINUTES="30"  # Maximum time to wait for DevWorkspaces to be ready
 MIN_KUBECTL_VERSION="1.24.0"
 MIN_K6_VERSION="1.1.0"
 
@@ -50,6 +52,77 @@ get_initial_pod_restart_counts() {
   # Get pod restart counts as JSON object
   kubectl get pods -n "$namespace" -l "$label_selector" -o json 2>/dev/null | \
     jq -r '.items | map({(.metadata.name): (.status.containerStatuses[0].restartCount // 0)}) | add // {}' || echo '{}'
+}
+
+wait_for_all_devworkspaces_ready() {
+  log_info "========================================"
+  log_info "Waiting for DevWorkspaces to be Ready"
+  log_info "========================================"
+
+  local timeout_seconds=$((WAIT_TIMEOUT_MINUTES * 60))
+  local start_time=$(date +%s)
+  local check_interval=10  # Check every 10 seconds
+
+  log_info "Waiting for ALL DevWorkspaces to be ready (timeout: ${WAIT_TIMEOUT_MINUTES} minutes)..."
+
+  while true; do
+    local current_time=$(date +%s)
+    local elapsed=$((current_time - start_time))
+
+    if [[ $elapsed -ge $timeout_seconds ]]; then
+      log_error "Timeout waiting for DevWorkspaces to be ready after ${WAIT_TIMEOUT_MINUTES} minutes"
+      return 1
+    fi
+
+    # Get DevWorkspace counts
+    local total_count ready_count failed_count starting_count
+    if [[ "$SEPARATE_NAMESPACES" == "true" ]]; then
+      total_count=$(kubectl get dw --all-namespaces -l load-test=test-type --no-headers 2>/dev/null | wc -l || echo "0")
+      ready_count=$(kubectl get dw --all-namespaces -l load-test=test-type -o json 2>/dev/null | \
+        jq '[.items[] | select(.status.phase == "Running")] | length' || echo "0")
+      failed_count=$(kubectl get dw --all-namespaces -l load-test=test-type -o json 2>/dev/null | \
+        jq '[.items[] | select(.status.phase == "Failed")] | length' || echo "0")
+      starting_count=$(kubectl get dw --all-namespaces -l load-test=test-type -o json 2>/dev/null | \
+        jq '[.items[] | select(.status.phase == "Starting")] | length' || echo "0")
+    else
+      total_count=$(kubectl get dw -n "$LOAD_TEST_NAMESPACE" --no-headers 2>/dev/null | wc -l || echo "0")
+      ready_count=$(kubectl get dw -n "$LOAD_TEST_NAMESPACE" -o json 2>/dev/null | \
+        jq '[.items[] | select(.status.phase == "Running")] | length' || echo "0")
+      failed_count=$(kubectl get dw -n "$LOAD_TEST_NAMESPACE" -o json 2>/dev/null | \
+        jq '[.items[] | select(.status.phase == "Failed")] | length' || echo "0")
+      starting_count=$(kubectl get dw -n "$LOAD_TEST_NAMESPACE" -o json 2>/dev/null | \
+        jq '[.items[] | select(.status.phase == "Starting")] | length' || echo "0")
+    fi
+
+    # Remove leading/trailing whitespace from counts
+    total_count=$(echo "$total_count" | xargs)
+    ready_count=$(echo "$ready_count" | xargs)
+    failed_count=$(echo "$failed_count" | xargs)
+    starting_count=$(echo "$starting_count" | xargs)
+
+    if [[ "$total_count" -eq 0 ]]; then
+      log_error "No DevWorkspaces found"
+      return 1
+    fi
+
+    local minutes_elapsed=$((elapsed / 60))
+    local seconds_remainder=$((elapsed % 60))
+    log_info "DevWorkspaces: ${ready_count}/${total_count} Running, ${starting_count} Starting, ${failed_count} Failed (${minutes_elapsed}m ${seconds_remainder}s elapsed)"
+
+    # Check if all are ready
+    if [[ "$ready_count" -eq "$total_count" ]]; then
+      log_success "All ${total_count} DevWorkspaces are ready!"
+      echo ""
+      return 0
+    fi
+
+    # Warn if there are failed DevWorkspaces
+    if [[ "$failed_count" -gt 0 ]]; then
+      log_warning "${failed_count} DevWorkspaces have failed - they will not become ready"
+    fi
+
+    sleep "$check_interval"
+  done
 }
 
 print_help() {
@@ -73,17 +146,22 @@ Options:
   --backup-monitor-duration <minutes>     How long to monitor backups (default: 30)
   --verify-restore <true|false>           Enable restore verification (default: true)
   --max-restore-samples <number>          Max workspaces to restore for verification (default: 10)
+  --wait-for-ready <true|false>           Wait for all DevWorkspaces to be ready before backup (default: true)
+  --wait-timeout <minutes>                Maximum time to wait for DevWorkspaces to be ready (default: 30)
   -h, --help                              Show this help message
 
 Examples:
-  # Basic usage (monitor backups for 30 minutes)
+  # Basic usage (monitor backups for 30 minutes, wait for all workspaces ready)
   $0
 
-  # Monitor for 60 minutes
-  $0 --backup-monitor-duration 60
+  # Monitor for 60 minutes with extended wait timeout
+  $0 --backup-monitor-duration 60 --wait-timeout 45
 
   # Monitor workspaces in separate namespaces
   $0 --separate-namespaces true --backup-monitor-duration 45
+
+  # Skip waiting for ready (useful if workspaces are already ready)
+  $0 --wait-for-ready false
 
 Environment Variables:
   KUBE_API      - Kubernetes API server URL (auto-detected if not set)
@@ -111,6 +189,10 @@ parse_arguments() {
         VERIFY_RESTORE="$2"; shift 2;;
       --max-restore-samples)
         MAX_RESTORE_SAMPLES="$2"; shift 2;;
+      --wait-for-ready)
+        WAIT_FOR_READY="$2"; shift 2;;
+      --wait-timeout)
+        WAIT_TIMEOUT_MINUTES="$2"; shift 2;;
       -h|--help)
         print_help; exit 0;;
       *)
@@ -393,12 +475,29 @@ main() {
   log_info "Monitor Duration: $BACKUP_MONITOR_DURATION_MINUTES minutes"
   log_info "Verify Restore: $VERIFY_RESTORE"
   log_info "Max Restore Samples: $MAX_RESTORE_SAMPLES"
+  log_info "Wait for Ready: $WAIT_FOR_READY"
+  log_info "Wait Timeout: $WAIT_TIMEOUT_MINUTES minutes"
   log_info "========================================"
   echo ""
 
   create_rbac
   copy_registry_secret_to_workspace_namespace
   start_background_watchers
+
+  # Wait for all DevWorkspaces to be ready before starting backup
+  if [[ "$WAIT_FOR_READY" == "true" ]]; then
+    if ! wait_for_all_devworkspaces_ready; then
+      log_error "Failed to wait for DevWorkspaces to be ready"
+      stop_background_watchers
+      cleanup_devworkspaces
+      delete_namespace
+      cleanup_rbac
+      exit 1
+    fi
+  else
+    log_info "Skipping wait for ready (WAIT_FOR_READY=$WAIT_FOR_READY)"
+    echo ""
+  fi
 
   local test_exit_code=0
   if [[ "$MODE" == "binary" ]]; then

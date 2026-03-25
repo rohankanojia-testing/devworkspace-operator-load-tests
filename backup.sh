@@ -3,7 +3,7 @@
 # backup.sh - Simple wrapper for backup load testing
 #
 # Usage:
-#   ./backup.sh [MAX_DEVWORKSPACES] [BACKUP_MONITOR_DURATION] [LOAD_TEST_NAMESPACE] [DWO_NAMESPACE] [REGISTRY_PATH] [REGISTRY_SECRET] [DWOC_CONFIG_TYPE] [SEPARATE_NAMESPACE] [BACKUP_SCHEDULE] [VERIFY_RESTORE] [MAX_RESTORE_SAMPLES]
+#   ./backup.sh [MAX_DEVWORKSPACES] [BACKUP_MONITOR_DURATION] [LOAD_TEST_NAMESPACE] [DWO_NAMESPACE] [REGISTRY_PATH] [REGISTRY_SECRET] [DWOC_CONFIG_TYPE] [SEPARATE_NAMESPACE] [BACKUP_SCHEDULE] [VERIFY_RESTORE] [MAX_RESTORE_SAMPLES] [WAIT_FOR_READY] [WAIT_TIMEOUT]
 #
 # Configuration:
 #   Set QUAY_USERNAME environment variable to override the default quay.io username
@@ -49,6 +49,12 @@
 #   # Restore all backed up workspaces (not just sample)
 #   ./backup.sh 20 30 loadtest-devworkspaces openshift-operators quay.io/rokumar quay-push-secret correct false "*/2 * * * *" true 20
 #
+#   # Wait for all workspaces with extended timeout (60 minutes)
+#   ./backup.sh 250 30 loadtest-devworkspaces openshift-operators quay.io/rokumar quay-push-secret correct true "*/2 * * * *" true 10 true 60
+#
+#   # Skip waiting for ready (if workspaces are already ready)
+#   ./backup.sh 50 30 loadtest-devworkspaces openshift-operators quay.io/rokumar quay-push-secret correct false "*/2 * * * *" true 10 false
+#
 
 set -euo pipefail
 
@@ -65,6 +71,8 @@ SEPARATE_NAMESPACE=${8:-false}
 BACKUP_SCHEDULE="${9:-*/2 * * * *}"
 VERIFY_RESTORE="${10:-true}"
 MAX_RESTORE_SAMPLES="${11:-10}"
+WAIT_FOR_READY="${12:-true}"
+WAIT_TIMEOUT="${13:-30}"
 
 # Set registry defaults based on config type
 if [[ "$DWOC_CONFIG_TYPE" == "openshift-internal" ]]; then
@@ -88,4 +96,6 @@ exec make test_backup \
   SEPARATE_NAMESPACE="${SEPARATE_NAMESPACE}" \
   BACKUP_SCHEDULE="${BACKUP_SCHEDULE}" \
   VERIFY_RESTORE="${VERIFY_RESTORE}" \
-  MAX_RESTORE_SAMPLES="${MAX_RESTORE_SAMPLES}"
+  MAX_RESTORE_SAMPLES="${MAX_RESTORE_SAMPLES}" \
+  WAIT_FOR_READY="${WAIT_FOR_READY}" \
+  WAIT_TIMEOUT="${WAIT_TIMEOUT}"

@@ -7,6 +7,8 @@
 #   make test_backup BACKUP_SCHEDULE="*/5 * * * *"
 #   make test_backup VERIFY_RESTORE=false MAX_DEVWORKSPACES=50
 #   make test_backup MAX_RESTORE_SAMPLES=20
+#   make test_backup WAIT_FOR_READY=true WAIT_TIMEOUT=60
+#   make test_backup WAIT_FOR_READY=false  # Skip waiting
 
 .PHONY: test_load test_webhook_load test_backup
 
@@ -25,6 +27,8 @@ test_webhook_load:
 # BACKUP_SCHEDULE: Cron schedule for backups (default: "*/2 * * * *" - every 2 minutes)
 # VERIFY_RESTORE: Enable restore verification after backup (default: "true")
 # MAX_RESTORE_SAMPLES: Maximum number of workspaces to restore for verification (default: 10)
+# WAIT_FOR_READY: Wait for all DevWorkspaces to be ready before backup (default: "true")
+# WAIT_TIMEOUT: Maximum time in minutes to wait for DevWorkspaces to be ready (default: 30)
 test_backup:
 	@bash test-devworkspace-controller-load/backup/backup-load-test.sh \
 		$(or $(MAX_DEVWORKSPACES),15) \
@@ -37,4 +41,6 @@ test_backup:
 		$(or $(SEPARATE_NAMESPACE),false) \
 		"$(or $(BACKUP_SCHEDULE),*/2 * * * *)" \
 		$(or $(VERIFY_RESTORE),true) \
-		$(or $(MAX_RESTORE_SAMPLES),10)
+		$(or $(MAX_RESTORE_SAMPLES),10) \
+		$(or $(WAIT_FOR_READY),true) \
+		$(or $(WAIT_TIMEOUT),30)
