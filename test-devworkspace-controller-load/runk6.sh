@@ -232,18 +232,32 @@ generate_token_and_api_url() {
   KUBE_API=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
 }
 
+# Helper function to keep only last N lines in a log file
+rotate_log() {
+  local logfile="$1"
+  local max_lines="${2:-1000}"
+
+  while IFS= read -r line; do
+    echo "$line" >> "$logfile"
+    # Every 100 lines, truncate to keep only last max_lines
+    if (( RANDOM % 100 == 0 )); then
+      tail -n "$max_lines" "$logfile" > "$logfile.tmp" && mv "$logfile.tmp" "$logfile"
+    fi
+  done
+}
+
 start_background_watchers() {
   echo "📁 Creating logs dir ..."
   mkdir -p ${LOGS_DIR}
   TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 
-  echo "🔍 Starting background watchers..."
-  kubectl get events --field-selector involvedObject.kind=Pod --watch --all-namespaces \
-    >> "${LOGS_DIR}/${TIMESTAMP}_events.log" 2>&1 &
+  echo "🔍 Starting background watchers (keeping last 1000 lines)..."
+  kubectl get events --field-selector involvedObject.kind=Pod --watch --all-namespaces 2>&1 | \
+    rotate_log "${LOGS_DIR}/${TIMESTAMP}_events.log" 1000 &
   PID_EVENTS_WATCH=$!
 
-  kubectl get dw --watch --all-namespaces \
-    >> "${LOGS_DIR}/${TIMESTAMP}_dw_watch.log" 2>&1 &
+  kubectl get dw --watch --all-namespaces 2>&1 | \
+    rotate_log "${LOGS_DIR}/${TIMESTAMP}_dw_watch.log" 1000 &
   PID_DW_WATCH=$!
 
   log_failed_devworkspaces &
