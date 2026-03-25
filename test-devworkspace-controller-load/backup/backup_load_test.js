@@ -175,12 +175,15 @@ function stopWorkspacesAndMonitorBackups(data) {
   console.log("Waiting 30 seconds for workspaces to stop...");
   sleep(30);
 
-  // Step 3: Wait for backup jobs to be created
+  // Step 3: Wait for backup jobs to be created for all stopped workspaces
   console.log("\nStep 3: Waiting for backup Jobs to be created...");
-  const jobsCreated = waitForBackupJobsCreation(10, 10);
+  console.log(`Expecting backup jobs for ${stoppedCount} stopped workspaces`);
+  const jobsCreated = waitForAllBackupJobsCreation(stoppedCount, 30, 10);
   if (!jobsCreated) {
-    console.warn("No backup Jobs were created - backup may not be configured correctly");
+    console.warn(`⚠️  Not all backup jobs were created within timeout`);
     console.warn("Continuing to monitor anyway...\n");
+  } else {
+    console.log(`✅ All ${stoppedCount} backup jobs have been created\n`);
   }
 
   // Step 4: Monitor backup jobs and operator/etcd metrics
@@ -247,21 +250,40 @@ function stopAllDevWorkspaces(devWorkspaces) {
   return stoppedCount;
 }
 
-function waitForBackupJobsCreation(maxWaitMinutes, pollIntervalSeconds) {
+function waitForAllBackupJobsCreation(expectedCount, maxWaitMinutes, pollIntervalSeconds) {
   const maxAttempts = (maxWaitMinutes * 60) / pollIntervalSeconds;
   let attempts = 0;
+  const startTime = Date.now();
+
+  console.log(`Waiting for ${expectedCount} backup jobs (max ${maxWaitMinutes} minutes)...`);
 
   while (attempts < maxAttempts) {
     const jobs = getBackupJobs();
+    const currentCount = jobs.length;
 
-    if (jobs.length > 0) {
-      console.log(`Backup Jobs created: ${jobs.length} found`);
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const progress = ((currentCount / expectedCount) * 100).toFixed(1);
+
+    // Log progress every 10 attempts or when count changes
+    if (attempts % 10 === 0 || (attempts > 0 && currentCount !== jobs.length)) {
+      console.log(`  [${elapsed}s] Backup jobs: ${currentCount}/${expectedCount} (${progress}%)`);
+    }
+
+    // Success: all jobs created
+    if (currentCount >= expectedCount) {
+      console.log(`  ✅ All ${expectedCount} backup jobs created after ${elapsed}s`);
       return true;
     }
 
     sleep(pollIntervalSeconds);
     attempts++;
   }
+
+  // Timeout - report how many we got
+  const jobs = getBackupJobs();
+  const finalCount = jobs.length;
+  const totalWaitTime = maxWaitMinutes * 60;
+  console.log(`  ⏱️  Timeout after ${totalWaitTime}s: only ${finalCount}/${expectedCount} jobs created`);
 
   return false;
 }
