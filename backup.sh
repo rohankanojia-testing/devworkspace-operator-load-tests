@@ -10,7 +10,7 @@
 #
 # Examples:
 #
-#   # Basic usage (defaults: correct DWOC, single namespace, external registry, every 2 min schedule, restore enabled)
+#   # Basic usage (defaults: correct DWOC, single namespace, external registry, every 10 min schedule, restore enabled)
 #   ./backup.sh 15 30
 #
 #   # External registry - Single namespace + correct DWOC
@@ -68,7 +68,7 @@ LOAD_TEST_NAMESPACE=${3:-loadtest-devworkspaces}
 DWO_NAMESPACE=${4:-openshift-operators}
 DWOC_CONFIG_TYPE=${7:-correct}
 SEPARATE_NAMESPACE=${8:-false}
-BACKUP_SCHEDULE="${9:-*/2 * * * *}"
+BACKUP_SCHEDULE="${9:-*/10 * * * *}"
 VERIFY_RESTORE="${10:-true}"
 MAX_RESTORE_SAMPLES="${11:-10}"
 WAIT_FOR_READY="${12:-true}"

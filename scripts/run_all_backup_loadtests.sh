@@ -348,7 +348,7 @@ parse_backup_args() {
     REGISTRY_SECRET=$(echo "$args" | grep -oP '(?<=--registry-secret )\S+' || echo "quay-push-secret")
 
     # Extract backup schedule if specified (handle quoted values with space)
-    BACKUP_SCHEDULE=$(echo "$args" | grep -oP "(?<=--backup-schedule )['\"]?[^'\"]+['\"]?" || echo "*/2 * * * *")
+    BACKUP_SCHEDULE=$(echo "$args" | grep -oP "(?<=--backup-schedule )['\"]?[^'\"]+['\"]?" || echo "*/10 * * * *")
     BACKUP_SCHEDULE=$(echo "$BACKUP_SCHEDULE" | tr -d '"' | tr -d "'")
 
     # Remove quotes from registry path and secret if present

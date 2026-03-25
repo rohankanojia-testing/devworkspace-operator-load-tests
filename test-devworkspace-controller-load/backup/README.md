@@ -270,7 +270,7 @@ The complete backup load test (`backup-load-test.sh`) performs these phases:
 | `REGISTRY_SECRET` | Secret name for registry auth | `quay-push-secret` |
 | `DWOC_CONFIG_TYPE` | DWOC config mode: `correct`, `incorrect`, or `openshift-internal` | `correct` |
 | `SEPARATE_NAMESPACE` | Use separate namespaces per workspace | `false` |
-| `BACKUP_SCHEDULE` | Cron schedule for backup jobs | `*/2 * * * *` |
+| `BACKUP_SCHEDULE` | Cron schedule for backup jobs | `*/10 * * * *` |
 | `VERIFY_RESTORE` | Enable restore verification after backup | `true` |
 | `MAX_RESTORE_SAMPLES` | Maximum number of workspaces to restore for verification | `10` |
 
