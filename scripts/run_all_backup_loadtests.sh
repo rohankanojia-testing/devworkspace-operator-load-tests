@@ -52,6 +52,7 @@ CLEANUP_MAX_WAIT=7200   # 2 hours for cleanup
 TEST_TIMEOUT=18000      # 5 hours per test (backup tests take longer)
 SKIP_CLEANUP="${SKIP_CLEANUP:-false}"
 RESTART_OPERATOR="${RESTART_OPERATOR:-true}"
+PROVISION_PVS="${PROVISION_PVS:-true}"  # Provision PVs before tests
 
 # Test plan file (required)
 TEST_PLAN_FILE="${1:-}"
@@ -169,6 +170,86 @@ handle_interrupt() {
     echo ""
     echo "Partial results saved in: $RUN_DIR"
     exit 130
+}
+
+
+########################################
+# PV PROVISIONING FOR BACKUP TESTS     #
+########################################
+delete_old_pvs() {
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}Deleting old PVs from previous runs...${NC}"
+    echo -e "${BLUE}========================================${NC}"
+
+    local pv_label="${PV_LABEL:-load-test}"
+    local pv_count=$(kubectl get pv -l ${pv_label} --no-headers 2>/dev/null | wc -l || echo "0")
+
+    if [ "$pv_count" -eq 0 ]; then
+        echo "No old PVs found with label ${pv_label}"
+        return 0
+    fi
+
+    echo "Found $pv_count PVs with label ${pv_label}, deleting..."
+    kubectl delete pv -l ${pv_label} --wait=false 2>/dev/null || true
+
+    # Wait for PVs to be deleted
+    local max_wait=120
+    local elapsed=0
+    while [ "$elapsed" -lt "$max_wait" ]; do
+        local remaining=$(kubectl get pv -l ${pv_label} --no-headers 2>/dev/null | wc -l || echo "0")
+        if [ "$remaining" -eq 0 ]; then
+            echo -e "${GREEN}All old PVs deleted successfully${NC}"
+            return 0
+        fi
+        echo "  Waiting for $remaining PVs to be deleted... (${elapsed}s)"
+        sleep 10
+        elapsed=$((elapsed + 10))
+    done
+
+    echo -e "${YELLOW}Warning: Some PVs may still be deleting${NC}"
+    return 0
+}
+
+provision_pvs_for_test() {
+    local max_workspaces="$1"
+
+    if [ -z "$max_workspaces" ] || [ "$max_workspaces" -eq 0 ]; then
+        echo "Skipping PV provisioning - no max_workspaces specified"
+        return 0
+    fi
+
+    # Call the external PV provisioning script
+    local pv_script="${SCRIPT_DIR}/provision-pvs.sh"
+
+    if [ ! -f "$pv_script" ]; then
+        echo -e "${RED}ERROR: PV provisioning script not found: $pv_script${NC}"
+        return 1
+    fi
+
+    bash "$pv_script" "$max_workspaces"
+}
+
+get_max_workspaces_from_plan() {
+    # Find the highest max-devworkspaces value in the test plan
+    local max_workspaces=0
+    local custom_count=$(jq '.custom_tests | length' "$TEST_PLAN_FILE" 2>/dev/null || echo "0")
+
+    for ((i=0; i<custom_count; i++)); do
+        local enabled=$(jq -r ".custom_tests[$i].enabled" "$TEST_PLAN_FILE")
+
+        if [ "$enabled" != "true" ]; then
+            continue
+        fi
+
+        local args=$(jq -r ".custom_tests[$i].args" "$TEST_PLAN_FILE")
+        local workspaces=$(echo "$args" | grep -oP '(?<=--max-devworkspaces )\S+' || echo "0")
+
+        if [ "$workspaces" -gt "$max_workspaces" ]; then
+            max_workspaces=$workspaces
+        fi
+    done
+
+    echo "$max_workspaces"
 }
 
 
@@ -600,7 +681,25 @@ echo "$(date)" > "$RUN_DIR/test_suite.log"
 load_test_plan_from_json
 show_test_plan
 
+# Provision PVs if enabled
+if [ "$PROVISION_PVS" == "true" ]; then
+    echo ""
+    delete_old_pvs
+
+    echo ""
+    MAX_WORKSPACES=$(get_max_workspaces_from_plan)
+    if [ "$MAX_WORKSPACES" -gt 0 ]; then
+        provision_pvs_for_test "$MAX_WORKSPACES"
+    else
+        echo -e "${YELLOW}Warning: No max-devworkspaces found in test plan, skipping PV provisioning${NC}"
+    fi
+else
+    echo ""
+    echo -e "${YELLOW}PV provisioning is disabled (PROVISION_PVS=$PROVISION_PVS)${NC}"
+fi
+
 # Wait 10 seconds before starting
+echo ""
 echo -e "${YELLOW}Tests will begin in 10 seconds... (Press Ctrl+C to cancel)${NC}"
 for i in {10..1}; do
     echo -n "$i... "
