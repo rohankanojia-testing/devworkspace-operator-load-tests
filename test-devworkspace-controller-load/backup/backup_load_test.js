@@ -55,6 +55,7 @@ const seenJobUids = new Set();
 const succeededJobUids = new Set();
 const failedJobUids = new Set();
 const backedUpWorkspaceIds = new Set();  // Track workspace IDs that were backed up
+const jobPodCounts = new Map();  // Track cumulative pod count per job UID
 
 export const options = {
   scenarios: {
@@ -317,11 +318,25 @@ function getBackupJobMetrics() {
       currentRunning++;
     }
 
-    // Track pods created by all current jobs
+    // Track pods created by this job (cumulative per job)
     const activePods = status.active || 0;
     const succeededPods = status.succeeded || 0;
     const failedPods = status.failed || 0;
-    currentTotalPods += activePods + succeededPods + failedPods;
+    const jobPodCount = activePods + succeededPods + failedPods;
+
+    // Update max pod count for this job (handles retries and updates)
+    const previousMaxPods = jobPodCounts.get(jobUid) || 0;
+    if (jobPodCount > previousMaxPods) {
+      jobPodCounts.set(jobUid, jobPodCount);
+    }
+
+    currentTotalPods += jobPodCount;
+  }
+
+  // Calculate cumulative pod count from all tracked jobs
+  let cumulativePodCount = 0;
+  for (const count of jobPodCounts.values()) {
+    cumulativePodCount += count;
   }
 
   // Cumulative totals from sets (persist even when jobs are garbage collected)
@@ -334,7 +349,8 @@ function getBackupJobMetrics() {
     succeeded: cumulativeSucceeded,
     failed: cumulativeFailed,
     running: currentRunning,
-    totalPods: currentTotalPods,
+    totalPods: currentTotalPods,  // Current pods from existing jobs
+    cumulativePodCount,  // Cumulative pods (persists after garbage collection)
     cumulativeTotal,
     cumulativeSucceeded,
     cumulativeFailed,
@@ -359,10 +375,10 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
       previousCumulativeTotal = metrics.cumulativeTotal;
     }
 
-    // Track new pods created (use current total pods, not cumulative)
-    if (metrics.totalPods > previousCumulativePods) {
-      backupPodsTotal.add(metrics.totalPods - previousCumulativePods);
-      previousCumulativePods = metrics.totalPods;
+    // Track new pods created (use cumulative pod count)
+    if (metrics.cumulativePodCount > previousCumulativePods) {
+      backupPodsTotal.add(metrics.cumulativePodCount - previousCumulativePods);
+      previousCumulativePods = metrics.cumulativePodCount;
     }
 
     // Update gauges
@@ -379,7 +395,7 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
     const currentStatus = `${metrics.cumulativeSucceeded}/${metrics.cumulativeFailed}/${metrics.running}`;
     if (iteration % 10 === 0 || currentStatus !== lastLoggedStatus) {
       const remainingMinutes = Math.ceil((endTime - Date.now()) / 60000);
-      console.log(`  [${iteration}] Jobs (cumulative) - Succeeded: ${metrics.cumulativeSucceeded}, Failed: ${metrics.cumulativeFailed}, Running: ${metrics.running}, Pods: ${metrics.totalPods} (${remainingMinutes}m remaining)`);
+      console.log(`  [${iteration}] Jobs (cumulative) - Succeeded: ${metrics.cumulativeSucceeded}, Failed: ${metrics.cumulativeFailed}, Running: ${metrics.running}, Pods: ${metrics.cumulativePodCount} (${remainingMinutes}m remaining)`);
       lastLoggedStatus = currentStatus;
     }
 
@@ -534,7 +550,8 @@ function collectFinalMetrics() {
   console.log(`Succeeded: ${metrics.cumulativeSucceeded}`);
   console.log(`Failed (hit backOffLimit): ${metrics.cumulativeFailed}`);
   console.log(`Running/Pending: ${metrics.running}`);
-  console.log(`Total Pods Created: ${metrics.totalPods}`);
+  console.log(`Total Pods Created (cumulative): ${metrics.cumulativePodCount}`);
+  console.log(`Current Pods in Existing Jobs: ${metrics.totalPods}`);
   console.log(`Currently Tracked Jobs: ${metrics.jobs.length} (may be less due to K8s job garbage collection)`);
 
   if (metrics.cumulativeTotal > 0) {
