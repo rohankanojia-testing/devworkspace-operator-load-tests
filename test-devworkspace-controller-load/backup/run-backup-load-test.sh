@@ -34,6 +34,8 @@ VERIFY_RESTORE="true"  # Enable restore verification by default
 MAX_RESTORE_SAMPLES="10"  # Number of workspaces to restore for verification
 WAIT_FOR_READY="true"  # Wait for ALL DevWorkspaces to be ready before starting backup
 WAIT_TIMEOUT_MINUTES="30"  # Maximum time to wait for DevWorkspaces to be ready
+BACKUP_SCHEDULE=""  # Override backup schedule (e.g., "*/5 * * * *"), empty means don't change
+ORIGINAL_BACKUP_SCHEDULE=""  # Store original schedule for restoration
 MIN_KUBECTL_VERSION="1.24.0"
 MIN_K6_VERSION="1.1.0"
 
@@ -125,6 +127,57 @@ wait_for_all_devworkspaces_ready() {
   done
 }
 
+get_backup_schedule() {
+  # Get current backup schedule from DWOC
+  local schedule
+  schedule=$(kubectl get devworkspaceoperatorconfig -n "$DWO_NAMESPACE" devworkspace-operator-config \
+    -o jsonpath='{.config.workspace.backupSchedule}' 2>/dev/null || echo "")
+
+  if [[ -z "$schedule" ]]; then
+    log_warning "Could not retrieve current backup schedule from DWOC"
+  fi
+
+  echo "$schedule"
+}
+
+set_backup_schedule() {
+  local new_schedule="$1"
+
+  if [[ -z "$new_schedule" ]]; then
+    log_error "Cannot set empty backup schedule"
+    return 1
+  fi
+
+  log_info "Setting backup schedule to: $new_schedule"
+
+  if kubectl patch devworkspaceoperatorconfig -n "$DWO_NAMESPACE" devworkspace-operator-config \
+    --type=merge -p "{\"config\":{\"workspace\":{\"backupSchedule\":\"$new_schedule\"}}}" >/dev/null 2>&1; then
+    log_success "Backup schedule updated to: $new_schedule"
+    return 0
+  else
+    log_error "Failed to update backup schedule"
+    return 1
+  fi
+}
+
+restore_backup_schedule() {
+  if [[ -z "$ORIGINAL_BACKUP_SCHEDULE" ]]; then
+    log_info "No original backup schedule to restore (was not changed)"
+    return 0
+  fi
+
+  log_info "Restoring original backup schedule: $ORIGINAL_BACKUP_SCHEDULE"
+
+  if kubectl patch devworkspaceoperatorconfig -n "$DWO_NAMESPACE" devworkspace-operator-config \
+    --type=merge -p "{\"config\":{\"workspace\":{\"backupSchedule\":\"$ORIGINAL_BACKUP_SCHEDULE\"}}}" >/dev/null 2>&1; then
+    log_success "Backup schedule restored to: $ORIGINAL_BACKUP_SCHEDULE"
+    return 0
+  else
+    log_warning "Failed to restore backup schedule - please restore manually"
+    return 1
+  fi
+}
+
 print_help() {
   cat <<EOF
 Usage: $0 [options]
@@ -148,6 +201,7 @@ Options:
   --max-restore-samples <number>          Max workspaces to restore for verification (default: 10)
   --wait-for-ready <true|false>           Wait for all DevWorkspaces to be ready before backup (default: true)
   --wait-timeout <minutes>                Maximum time to wait for DevWorkspaces to be ready (default: 30)
+  --backup-schedule <cron>                Override backup cron schedule (e.g., "*/5 * * * *") (default: don't change)
   -h, --help                              Show this help message
 
 Examples:
@@ -162,6 +216,9 @@ Examples:
 
   # Skip waiting for ready (useful if workspaces are already ready)
   $0 --wait-for-ready false
+
+  # Override backup schedule to run every 5 minutes
+  $0 --backup-schedule "*/5 * * * *"
 
 Environment Variables:
   KUBE_API      - Kubernetes API server URL (auto-detected if not set)
@@ -193,6 +250,8 @@ parse_arguments() {
         WAIT_FOR_READY="$2"; shift 2;;
       --wait-timeout)
         WAIT_TIMEOUT_MINUTES="$2"; shift 2;;
+      --backup-schedule)
+        BACKUP_SCHEDULE="$2"; shift 2;;
       -h|--help)
         print_help; exit 0;;
       *)
@@ -477,8 +536,21 @@ main() {
   log_info "Max Restore Samples: $MAX_RESTORE_SAMPLES"
   log_info "Wait for Ready: $WAIT_FOR_READY"
   log_info "Wait Timeout: $WAIT_TIMEOUT_MINUTES minutes"
+  if [[ -n "$BACKUP_SCHEDULE" ]]; then
+    log_info "Backup Schedule Override: $BACKUP_SCHEDULE"
+  fi
   log_info "========================================"
   echo ""
+
+  # Override backup schedule if requested
+  if [[ -n "$BACKUP_SCHEDULE" ]]; then
+    ORIGINAL_BACKUP_SCHEDULE=$(get_backup_schedule)
+    if [[ -n "$ORIGINAL_BACKUP_SCHEDULE" ]]; then
+      log_info "Current backup schedule: $ORIGINAL_BACKUP_SCHEDULE"
+    fi
+    set_backup_schedule "$BACKUP_SCHEDULE"
+    echo ""
+  fi
 
   create_rbac
   copy_registry_secret_to_workspace_namespace
@@ -492,6 +564,9 @@ main() {
       cleanup_devworkspaces
       delete_namespace
       cleanup_rbac
+      if [[ -n "$BACKUP_SCHEDULE" ]]; then
+        restore_backup_schedule
+      fi
       exit 1
     fi
   else
@@ -516,6 +591,12 @@ main() {
   cleanup_devworkspaces
   delete_namespace
   cleanup_rbac
+
+  # Restore backup schedule if it was changed
+  if [[ -n "$BACKUP_SCHEDULE" ]]; then
+    restore_backup_schedule
+  fi
+
   log_success "Cleanup completed"
   echo ""
 

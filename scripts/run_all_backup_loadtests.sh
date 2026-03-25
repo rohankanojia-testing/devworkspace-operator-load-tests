@@ -347,6 +347,10 @@ parse_backup_args() {
     REGISTRY_PATH=$(echo "$args" | grep -oP '(?<=--registry-path )\S+' || echo "quay.io/rokumar")
     REGISTRY_SECRET=$(echo "$args" | grep -oP '(?<=--registry-secret )\S+' || echo "quay-push-secret")
 
+    # Extract backup schedule if specified (handle quoted values with space)
+    BACKUP_SCHEDULE=$(echo "$args" | grep -oP "(?<=--backup-schedule )['\"]?[^'\"]+['\"]?" || echo "*/2 * * * *")
+    BACKUP_SCHEDULE=$(echo "$BACKUP_SCHEDULE" | tr -d '"' | tr -d "'")
+
     # Remove quotes from registry path and secret if present
     REGISTRY_PATH=$(echo "$REGISTRY_PATH" | tr -d '"')
     REGISTRY_SECRET=$(echo "$REGISTRY_SECRET" | tr -d '"')
@@ -358,6 +362,7 @@ parse_backup_args() {
     export DWOC_CONFIG_TYPE
     export REGISTRY_PATH
     export REGISTRY_SECRET
+    export BACKUP_SCHEDULE
 }
 
 #############################################
@@ -388,6 +393,7 @@ run_backup_test() {
     echo "  DWOC_CONFIG_TYPE: $DWOC_CONFIG_TYPE"
     echo "  REGISTRY_PATH: $REGISTRY_PATH"
     echo "  REGISTRY_SECRET: $REGISTRY_SECRET"
+    echo "  BACKUP_SCHEDULE: $BACKUP_SCHEDULE"
     echo ""
 
     # Cleanup before test
