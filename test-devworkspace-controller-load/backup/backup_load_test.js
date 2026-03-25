@@ -54,6 +54,7 @@ const headers = createAuthHeaders(token);
 const seenJobUids = new Set();
 const succeededJobUids = new Set();
 const failedJobUids = new Set();
+const backedUpWorkspaceIds = new Set();  // Track workspace IDs that were backed up
 
 export const options = {
   scenarios: {
@@ -289,6 +290,8 @@ function getBackupJobMetrics() {
 
     const status = job.status || {};
     const conditions = status.conditions || [];
+    const labels = job.metadata?.labels || {};
+    const workspaceId = labels['controller.devfile.io/devworkspace_id'];
 
     // Track this job if we haven't seen it before
     if (!seenJobUids.has(jobUid)) {
@@ -298,6 +301,11 @@ function getBackupJobMetrics() {
     // Check if job has succeeded and we haven't counted it yet
     if (status.succeeded === 1 && !succeededJobUids.has(jobUid)) {
       succeededJobUids.add(jobUid);
+
+      // Track workspace ID for successful backups (cumulative)
+      if (workspaceId) {
+        backedUpWorkspaceIds.add(workspaceId);
+      }
     }
     // Check if job has permanently failed and we haven't counted it yet
     else if (conditions.some(c => c.type === 'Failed' && c.status === 'True') && !failedJobUids.has(jobUid)) {
@@ -411,18 +419,8 @@ function getImageStreams(namespace) {
 }
 
 function verifyBackupCoverage(devWorkspaces) {
-  const jobs = getBackupJobs();
-  const backedUpWorkspaceIds = new Set();
-
-  // Extract workspace IDs from backup job labels
-  for (const job of jobs) {
-    const labels = job.metadata?.labels || {};
-    const workspaceId = labels['controller.devfile.io/devworkspace_id'];
-
-    if (workspaceId && job.status?.succeeded === 1) {
-      backedUpWorkspaceIds.add(workspaceId);
-    }
-  }
+  // Use cumulative backedUpWorkspaceIds Set (populated during monitoring)
+  // This persists even after jobs are garbage collected
 
   // Build list of successfully backed up workspaces
   const backedUpWorkspaces = [];
@@ -441,7 +439,8 @@ function verifyBackupCoverage(devWorkspaces) {
 
   workspacesBackedUp.add(backedUpWorkspaces.length);
 
-  console.log(`Backup Coverage: ${backedUpWorkspaces.length}/${devWorkspaces.length} workspaces backed up`);
+  console.log(`Backup Coverage (cumulative): ${backedUpWorkspaces.length}/${devWorkspaces.length} workspaces backed up`);
+  console.log(`Note: Tracked from ${backedUpWorkspaceIds.size} unique workspace IDs across all backup cycles`);
 
   if (backedUpWorkspaces.length < devWorkspaces.length) {
     console.warn(`Warning: ${devWorkspaces.length - backedUpWorkspaces.length} workspaces were not backed up`);
