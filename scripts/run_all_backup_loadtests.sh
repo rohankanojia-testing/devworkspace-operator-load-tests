@@ -687,12 +687,11 @@ if [ "$PROVISION_PVS" == "true" ]; then
     delete_old_pvs
 
     echo ""
-    MAX_WORKSPACES=$(get_max_workspaces_from_plan)
-    if [ "$MAX_WORKSPACES" -gt 0 ]; then
-        provision_pvs_for_test "$MAX_WORKSPACES"
-    else
-        echo -e "${YELLOW}Warning: No max-devworkspaces found in test plan, skipping PV provisioning${NC}"
-    fi
+    # Always provision 3000 PVs regardless of test plan
+    # This ensures sufficient PVs are available for large-scale tests
+    FIXED_PV_COUNT=3000
+    echo -e "${BLUE}Pre-allocating ${FIXED_PV_COUNT} PVs for backup tests${NC}"
+    provision_pvs_for_test "$FIXED_PV_COUNT"
 else
     echo ""
     echo -e "${YELLOW}PV provisioning is disabled (PROVISION_PVS=$PROVISION_PVS)${NC}"

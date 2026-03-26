@@ -4,14 +4,26 @@
   "custom_tests": [
     {
       "name": "backup_500_incorrect_config",
-      "args": "--mode binary --max-vus 200 --max-devworkspaces 500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 1800 --test-duration-minutes 30 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path quay.io/CHANGEME --registry-secret quay-push-secret --backup-wait-minutes 30",
-      "enabled": true,
+      "args": "--mode binary --max-vus 200 --max-devworkspaces 500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 1800 --test-duration-minutes 30 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path quay.io/rohan.kanojia --registry-secret quay-push-secret --backup-wait-minutes 30",
+      "enabled": false,
       "description": "500 workspaces with backup testing - incorrect DWOC config (medium scale)"
     },
     {
-      "name": "backup_2000_incorrect_config",
-      "args": "--mode binary --max-vus 300 --max-devworkspaces 2000 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 50 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path quay.io/CHANGEME --registry-secret quay-push-secret --backup-wait-minutes 45",
+      "name": "backup_1000_incorrect_config",
+      "args": "--mode binary --max-vus 250 --max-devworkspaces 1000 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 2400 --test-duration-minutes 40 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path quay.io/rohan.kanojia --registry-secret quay-push-secret --backup-wait-minutes 37",
       "enabled": false,
+      "description": "1000 workspaces with backup testing - incorrect DWOC config (large scale)"
+    },
+    {
+      "name": "backup_1500_incorrect_config",
+      "args": "--mode binary --max-vus 275 --max-devworkspaces 1500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 2700 --test-duration-minutes 45 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path quay.io/rohan.kanojia --registry-secret quay-push-secret --backup-wait-minutes 41",
+      "enabled": true,
+      "description": "1500 workspaces with backup testing - incorrect DWOC config (large scale)"
+    },
+    {
+      "name": "backup_2000_incorrect_config",
+      "args": "--mode binary --max-vus 300 --max-devworkspaces 2000 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 50 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path quay.io/rohan.kanojia --registry-secret quay-push-secret --backup-wait-minutes 45",
+      "enabled": true,
       "description": "2000 workspaces with backup testing - incorrect DWOC config (production scale)"
     }
   ]

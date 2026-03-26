@@ -8,7 +8,7 @@ set -euo pipefail
 BASE_DIR="${PV_BASE_DIR:-/tmp/hostpath-storage}"
 STORAGE_CLASS="${PV_STORAGE_CLASS:-hostpath-sc}"
 PV_SIZE="${PV_SIZE:-50Mi}"  # Minimal size for backup testing
-PV_PER_NODE="${PV_PER_NODE:-800}"
+PV_PER_NODE="${PV_PER_NODE:-1000}"
 PV_LABEL="${PV_LABEL:-load-test}"
 NAMESPACE="${NAMESPACE:-test-rokum}"
 
