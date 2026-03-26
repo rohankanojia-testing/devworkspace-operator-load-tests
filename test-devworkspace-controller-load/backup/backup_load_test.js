@@ -673,51 +673,54 @@ function ensureRegistrySecretInNamespace(namespace) {
 }
 
 function captureRestoreFailureLogs(namespace, workspaceName) {
-  // Get pod for the failed workspace
-  const podListUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods?labelSelector=controller.devfile.io/devworkspace_name=${workspaceName}`;
-  const podListRes = http.get(podListUrl, {headers});
+  try {
+    // Get pod for the failed workspace
+    const podListUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods?labelSelector=controller.devfile.io/devworkspace_name=${workspaceName}`;
+    const podListRes = http.get(podListUrl, {headers});
 
-  if (podListRes.status !== 200) {
-    console.error(`     Failed to get pod list (HTTP ${podListRes.status})`);
-    return;
-  }
+    if (podListRes.status !== 200) {
+      console.log(`[DEBUG] Failed to get pod list: HTTP ${podListRes.status}`);
+      return;
+    }
 
-  const pods = JSON.parse(podListRes.body).items;
-  if (pods.length === 0) {
-    console.error(`     Pod not found or already deleted`);
-    return;
-  }
+    const pods = JSON.parse(podListRes.body).items;
+    if (pods.length === 0) {
+      console.log(`[DEBUG] Pod not found (may be deleted already)`);
+      return;
+    }
 
-  const podName = pods[0].metadata.name;
+    const podName = pods[0].metadata.name;
+    console.log(`[DEBUG] Found pod: ${podName}`);
 
-  // Try to get restore initContainer logs
-  const logUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}/log?container=devworkspace-backup-restore`;
-  const logRes = http.get(logUrl, {headers});
+    // Try to get restore initContainer logs
+    const logUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}/log?container=devworkspace-backup-restore&tailLines=20`;
+    const logRes = http.get(logUrl, {headers});
 
-  if (logRes.status === 200) {
-    console.error(`     Restore initContainer logs:`);
-    const logs = logRes.body.split('\n');
-    // Show last 20 lines or all if fewer
-    const linesToShow = logs.slice(-20);
-    linesToShow.forEach(line => {
-      if (line.trim()) {
-        console.error(`       ${line}`);
-      }
-    });
-  } else {
-    console.error(`     Failed to get restore logs (HTTP ${logRes.status})`);
+    if (logRes.status === 200) {
+      const logs = logRes.body.split('\n').filter(l => l.trim());
+      console.log(`\n--- Restore Logs for ${namespace}/${workspaceName} ---`);
+      logs.forEach(line => console.log(line));
+      console.log(`--- End Restore Logs ---\n`);
+    } else {
+      console.log(`[DEBUG] Failed to get logs: HTTP ${logRes.status}`);
 
-    // Try to get pod status for additional context
-    const podUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}`;
-    const podRes = http.get(podUrl, {headers});
-    if (podRes.status === 200) {
-      const pod = JSON.parse(podRes.body);
-      const initContainers = pod.status?.initContainerStatuses || [];
-      const restoreContainer = initContainers.find(c => c.name === 'devworkspace-backup-restore');
-      if (restoreContainer?.state?.terminated?.message) {
-        console.error(`     Termination message: ${restoreContainer.state.terminated.message}`);
+      // Try to get pod status for additional context
+      const podUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}`;
+      const podRes = http.get(podUrl, {headers});
+      if (podRes.status === 200) {
+        const pod = JSON.parse(podRes.body);
+        const initContainers = pod.status?.initContainerStatuses || [];
+        const restoreContainer = initContainers.find(c => c.name === 'devworkspace-backup-restore');
+        if (restoreContainer) {
+          console.log(`[DEBUG] Container state: ${JSON.stringify(restoreContainer.state)}`);
+          if (restoreContainer.state?.terminated?.message) {
+            console.log(`Termination: ${restoreContainer.state.terminated.message}`);
+          }
+        }
       }
     }
+  } catch (err) {
+    console.log(`[ERROR] Exception in captureRestoreFailureLogs: ${err.message}`);
   }
 }
 
@@ -822,8 +825,8 @@ function verifyWorkspaceRestore(backedUpWorkspaces) {
           failCount++;
           restoreWorkspacesFailed.add(1);
           const failureMessage = dw.status?.message || 'No error message available';
-          console.error(`  ❌ ${ws.namespace}/${ws.name} failed`);
-          console.error(`     Reason: ${failureMessage}`);
+          console.log(`\n❌ RESTORE FAILED: ${ws.namespace}/${ws.name}`);
+          console.log(`   Reason: ${failureMessage}`);
           captureRestoreFailureLogs(ws.namespace, ws.name);
         }
       }
@@ -837,7 +840,7 @@ function verifyWorkspaceRestore(backedUpWorkspaces) {
     if (!ws.done) {
       failCount++;
       restoreWorkspacesFailed.add(1);
-      console.error(`  ❌ ${ws.namespace}/${ws.name} timed out (${ws.phase})`);
+      console.log(`\n❌ RESTORE TIMEOUT: ${ws.namespace}/${ws.name} (phase: ${ws.phase})`);
       captureRestoreFailureLogs(ws.namespace, ws.name);
     }
   });
