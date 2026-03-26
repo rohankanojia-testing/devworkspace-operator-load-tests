@@ -70,9 +70,15 @@ else
 fi
 echo ""
 
-# Step 2: Pre-create and unlock directories on nodes
+# Step 2: Clean up old directories and create new ones
 echo "🏗️  Step 2: Preparing directories on nodes..."
 for NODE in $NODES; do
+    echo "  🧹 Cleaning old directories on $NODE..."
+
+    # Remove old directories for this node
+    kubectl debug node/$NODE --image=registry.access.redhat.com/ubi8/ubi-minimal -- chroot /host /bin/bash -c "
+        rm -rf $BASE_DIR/$NODE 2>/dev/null || true" 2>&1 | grep -qv "Temporary namespace" || true
+
     echo "  🔓 Creating $PVS_PER_NODE_CALC directories on $NODE..."
 
     # Use seq to generate directory list (brace expansion doesn't work with variables)
