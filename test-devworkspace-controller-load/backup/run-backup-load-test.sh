@@ -64,6 +64,7 @@ wait_for_all_devworkspaces_ready() {
   local timeout_seconds=$((WAIT_TIMEOUT_MINUTES * 60))
   local start_time=$(date +%s)
   local check_interval=10  # Check every 10 seconds
+  local reported_failures=""  # Track reported failures to avoid duplicates
 
   log_info "Waiting for ALL DevWorkspaces to be ready (timeout: ${WAIT_TIMEOUT_MINUTES} minutes)..."
 
@@ -118,8 +119,33 @@ wait_for_all_devworkspaces_ready() {
       return 0
     fi
 
-    # Warn if there are failed DevWorkspaces
+    # Report details for failed DevWorkspaces (only once per failure)
     if [[ "$failed_count" -gt 0 ]]; then
+      local failed_workspaces
+      if [[ "$SEPARATE_NAMESPACES" == "true" ]]; then
+        failed_workspaces=$(kubectl get dw --all-namespaces -l load-test=test-type -o json 2>/dev/null | \
+          jq -r '.items[] | select(.status.phase == "Failed") | "\(.metadata.namespace)/\(.metadata.name)"' || echo "")
+      else
+        failed_workspaces=$(kubectl get dw -n "$LOAD_TEST_NAMESPACE" -o json 2>/dev/null | \
+          jq -r '.items[] | select(.status.phase == "Failed") | "\(.metadata.namespace)/\(.metadata.name)"' || echo "")
+      fi
+
+      # Report new failures
+      while IFS= read -r dw_id; do
+        if [[ -n "$dw_id" ]] && ! echo "$reported_failures" | grep -q "$dw_id"; then
+          local ns="${dw_id%%/*}"
+          local name="${dw_id##*/}"
+          local message=$(kubectl get dw "$name" -n "$ns" -o jsonpath='{.status.message}' 2>/dev/null || echo "No error message available")
+
+          echo ""
+          log_error "Failed DevWorkspace: $name (namespace: $ns)"
+          log_error "  Reason: $message"
+          echo ""
+
+          reported_failures="${reported_failures}${dw_id}"$'\n'
+        fi
+      done <<< "$failed_workspaces"
+
       log_warning "${failed_count} DevWorkspaces have failed - they will not become ready"
     fi
 
