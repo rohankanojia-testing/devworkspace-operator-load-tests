@@ -1,143 +1,104 @@
 #!/bin/bash
-# 🚀 HIGH-DENSITY STATIC PV PROVISIONER FOR BACKUP LOAD TESTS
-# Provisions PVs on bare metal nodes for large-scale DevWorkspace testing
-
 set -euo pipefail
 
-# --- CONFIGURATION ---
-BASE_DIR="${PV_BASE_DIR:-/tmp/hostpath-storage}"
-STORAGE_CLASS="${PV_STORAGE_CLASS:-hostpath-sc}"
-PV_SIZE="${PV_SIZE:-50Mi}"  # Minimal size for backup testing
-PV_PER_NODE="${PV_PER_NODE:-1000}"
-PV_LABEL="${PV_LABEL:-load-test}"
-NAMESPACE="${NAMESPACE:-test-rokum}"
+# --- CONFIG ---
+BASE_DIR="/var/lib/hostpath-provisioner"
+STORAGE_CLASS="hostpath-sc"
+PV_SIZE="200Mi"
+PV_PER_NODE=750
 
-# Parse arguments
+WORKLOAD_LABEL="devworkspace-load-test"
+TEST_ID="run-$(date +%s)"   # dynamic per run
+
 MAX_WORKSPACES="${1:-0}"
-
 if [ "$MAX_WORKSPACES" -eq 0 ]; then
-    echo "ERROR: Maximum number of workspaces required"
-    echo "Usage: $0 <max_workspaces>"
-    echo "Example: $0 2500"
-    exit 1
+  echo "Usage: $0 <max_workspaces>"
+  exit 1
 fi
 
 echo "========================================="
-echo "PV Provisioner for Backup Load Tests"
+echo "🚀 DevWorkspace PV Provisioner"
 echo "========================================="
 echo "Max Workspaces: $MAX_WORKSPACES"
-echo "PV Size: $PV_SIZE"
-echo "Storage Class: $STORAGE_CLASS"
-echo "PVs per Node: $PV_PER_NODE"
+echo "Test ID: $TEST_ID"
 echo "========================================="
+
+# --- CLEANUP OLD PVs ---
+echo "🧹 Cleaning old test PVs (workload=$WORKLOAD_LABEL)..."
+
+# Delete PVCs first (avoid PV stuck in Bound/Released)
+oc delete pvc -A -l workload=$WORKLOAD_LABEL --ignore-not-found || true
+
+# Delete PVs by label
+oc delete pv -l workload=$WORKLOAD_LABEL --ignore-not-found || true
+
+echo "✅ Old test PVs cleaned"
 echo ""
 
-# Get worker nodes automatically
-NODES=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
+# --- NODES ---
+NODES=$(oc get nodes -o jsonpath='{.items[*].metadata.name}')
 NODE_COUNT=$(echo "$NODES" | wc -w)
 
-if [ "$NODE_COUNT" -eq 0 ]; then
-    echo "❌ ERROR: No nodes found"
-    exit 1
-fi
-
-echo "Found $NODE_COUNT nodes"
-
-# Calculate PVs needed per node (add 10% buffer)
 TOTAL_PVS_NEEDED=$(( MAX_WORKSPACES + (MAX_WORKSPACES / 10) ))
-PVS_PER_NODE_CALC=$(( (TOTAL_PVS_NEEDED + NODE_COUNT - 1) / NODE_COUNT ))
+PVS_PER_NODE=$(( (TOTAL_PVS_NEEDED + NODE_COUNT - 1) / NODE_COUNT ))
 
-# Cap at PV_PER_NODE limit
-if [ "$PVS_PER_NODE_CALC" -gt "$PV_PER_NODE" ]; then
-    PVS_PER_NODE_CALC=$PV_PER_NODE
-    echo "⚠️  Warning: Capping PVs per node at $PV_PER_NODE"
-fi
+echo "Nodes: $NODE_COUNT | PVs per node: $PVS_PER_NODE"
 
-TOTAL_PVS=$((PVS_PER_NODE_CALC * NODE_COUNT))
-
-echo "Provisioning $PVS_PER_NODE_CALC PVs per node"
-echo "Total PVs to create: $TOTAL_PVS"
-echo ""
-
-# Step 1: Adjust Namespace Security (SCC) for OpenShift
-echo "🔐 Step 1: Adjusting Namespace Security (SCC)..."
-if command -v oc &> /dev/null; then
-    oc adm policy add-scc-to-group hostmount-anyuid system:serviceaccounts:$NAMESPACE 2>/dev/null || true
-    oc adm policy add-scc-to-group privileged system:serviceaccounts:$NAMESPACE 2>/dev/null || true
-    echo "✅ SCC policies configured"
-else
-    echo "ℹ️  Not an OpenShift cluster, skipping SCC configuration"
-fi
-echo ""
-
-# Step 2: Clean up old directories and create new ones
-echo "🏗️  Step 2: Preparing directories on nodes..."
+# --- STEP 1: Prepare directories ---
 for NODE in $NODES; do
-    echo "  🧹 Cleaning old directories on $NODE..."
+  echo "🔧 Preparing $NODE"
 
-    # Remove old directories for this node
-    kubectl debug node/$NODE --image=registry.access.redhat.com/ubi8/ubi-minimal -- chroot /host /bin/bash -c "
-        rm -rf $BASE_DIR/$NODE 2>/dev/null || true" 2>&1 | grep -qv "Temporary namespace" || true
+  oc debug node/$NODE -- chroot /host bash -c "
+    mkdir -p $BASE_DIR/$NODE
 
-    echo "  🔓 Creating $PVS_PER_NODE_CALC directories on $NODE..."
+    for i in \$(seq 1 $PVS_PER_NODE); do
+      mkdir -p $BASE_DIR/$NODE/pv-\$i
+    done
 
-    # Use seq to generate directory list (brace expansion doesn't work with variables)
-    kubectl debug node/$NODE --image=registry.access.redhat.com/ubi8/ubi-minimal -- chroot /host /bin/bash -c "
-        for i in \$(seq 1 $PVS_PER_NODE_CALC); do
-            mkdir -p $BASE_DIR/$NODE/pv-\$i
-        done && \
-        chmod -R 777 $BASE_DIR && \
-        chcon -R -t container_file_t $BASE_DIR 2>/dev/null || true" 2>&1 | grep -qv "Temporary namespace" || true
+    chmod -R 777 $BASE_DIR
+    chcon -R -t container_file_t $BASE_DIR || true
+  " >/dev/null 2>&1
 
-    # Verify directories were created
-    VERIFY_COUNT=$(kubectl debug node/$NODE --image=registry.access.redhat.com/ubi8/ubi-minimal -- chroot /host /bin/bash -c "ls -1d $BASE_DIR/$NODE/pv-* 2>/dev/null | wc -l" 2>&1 | grep -v "Temporary\|Removing\|Creating" | tail -1 || echo "0")
+  COUNT=$(oc debug node/$NODE -- chroot /host bash -c \
+    "find $BASE_DIR/$NODE -maxdepth 1 -type d -name 'pv-*' | wc -l")
 
-    if [ "$VERIFY_COUNT" -lt "$PVS_PER_NODE_CALC" ]; then
-        echo "❌ ERROR: Only created $VERIFY_COUNT/$PVS_PER_NODE_CALC directories on $NODE"
-        exit 1
-    fi
+  if [ "$COUNT" -lt "$PVS_PER_NODE" ]; then
+    echo "❌ Directory creation failed on $NODE ($COUNT/$PVS_PER_NODE)"
+    exit 1
+  fi
 
-    echo "  ✅ Verified $VERIFY_COUNT directories on $NODE"
+  echo "✅ $NODE ready ($COUNT dirs)"
 done
-echo "✅ All directories prepared on all nodes"
-echo ""
 
-# Step 3: Configure StorageClass
-echo "🛠️  Step 3: Configuring StorageClass..."
-cat <<EOF | kubectl apply -f -
+# --- STEP 2: StorageClass ---
+cat <<EOF | oc apply -f -
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: ${STORAGE_CLASS}
+  name: $STORAGE_CLASS
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: kubernetes.io/no-provisioner
 volumeBindingMode: WaitForFirstConsumer
 reclaimPolicy: Delete
 EOF
-echo "✅ StorageClass ${STORAGE_CLASS} configured"
-echo ""
 
-# Step 4: Create PersistentVolumes
-echo "📡 Step 4: Creating $TOTAL_PVS PersistentVolumes..."
-PV_COUNT=0
+echo "✅ StorageClass ready"
+
+# --- STEP 3: PV creation ---
+echo "📦 Creating PVs..."
 
 for NODE in $NODES; do
-    echo "  📦 Generating PV manifest for $NODE..."
-    MANIFEST_FILE="/tmp/pvs-${NODE}.yaml"
-    > "$MANIFEST_FILE"
-
-    for i in $(seq 1 $PVS_PER_NODE_CALC); do
-        PV_NAME="hp-pv-${NODE}-${i}"
-        NODE_DIR="${BASE_DIR}/${NODE}/pv-${i}"
-
-        cat <<EOF >> "$MANIFEST_FILE"
+  for i in $(seq 1 $PVS_PER_NODE); do
+    cat <<EOF | oc apply -f - >/dev/null
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: ${PV_NAME}
+  name: hp-pv-${NODE}-${i}
   labels:
-    ${PV_LABEL}: "backup-run"
+    workload: ${WORKLOAD_LABEL}
+    test-id: ${TEST_ID}
+    type: hostpath
 spec:
   capacity:
     storage: ${PV_SIZE}
@@ -146,32 +107,27 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: ${STORAGE_CLASS}
   hostPath:
-    path: ${NODE_DIR}
-    type: Directory
+    path: ${BASE_DIR}/${NODE}/pv-${i}
+    type: DirectoryOrCreate
   nodeAffinity:
     required:
       nodeSelectorTerms:
-        - matchExpressions:
-            - key: kubernetes.io/hostname
-              operator: In
-              values:
-                - ${NODE}
----
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - ${NODE}
 EOF
-        PV_COUNT=$((PV_COUNT + 1))
-    done
+  done
 
-    kubectl apply -f "$MANIFEST_FILE" >/dev/null 2>&1
-    rm "$MANIFEST_FILE"
-    echo "  ✅ Created $PVS_PER_NODE_CALC PVs on $NODE"
+  echo "✅ PVs created for $NODE"
 done
 
 echo ""
 echo "========================================="
-echo "🏁 SUCCESS: Cluster PV Provisioning Complete"
+echo "🎉 DONE"
 echo "========================================="
-echo "Total PVs Created: $PV_COUNT"
-echo "PV Size: $PV_SIZE"
-echo "Storage Class: $STORAGE_CLASS"
-echo "Ready for ${MAX_WORKSPACES}+ workspace backup testing"
+echo "Test ID: $TEST_ID"
+echo "Delete later with:"
+echo "  oc delete pv -l workload=$WORKLOAD_LABEL"
 echo "========================================="
