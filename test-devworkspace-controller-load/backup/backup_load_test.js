@@ -672,6 +672,55 @@ function ensureRegistrySecretInNamespace(namespace) {
   return true;
 }
 
+function captureRestoreFailureLogs(namespace, workspaceName) {
+  // Get pod for the failed workspace
+  const podListUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods?labelSelector=controller.devfile.io/devworkspace_name=${workspaceName}`;
+  const podListRes = http.get(podListUrl, {headers});
+
+  if (podListRes.status !== 200) {
+    console.error(`     Failed to get pod list (HTTP ${podListRes.status})`);
+    return;
+  }
+
+  const pods = JSON.parse(podListRes.body).items;
+  if (pods.length === 0) {
+    console.error(`     Pod not found or already deleted`);
+    return;
+  }
+
+  const podName = pods[0].metadata.name;
+
+  // Try to get restore initContainer logs
+  const logUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}/log?container=devworkspace-backup-restore`;
+  const logRes = http.get(logUrl, {headers});
+
+  if (logRes.status === 200) {
+    console.error(`     Restore initContainer logs:`);
+    const logs = logRes.body.split('\n');
+    // Show last 20 lines or all if fewer
+    const linesToShow = logs.slice(-20);
+    linesToShow.forEach(line => {
+      if (line.trim()) {
+        console.error(`       ${line}`);
+      }
+    });
+  } else {
+    console.error(`     Failed to get restore logs (HTTP ${logRes.status})`);
+
+    // Try to get pod status for additional context
+    const podUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}`;
+    const podRes = http.get(podUrl, {headers});
+    if (podRes.status === 200) {
+      const pod = JSON.parse(podRes.body);
+      const initContainers = pod.status?.initContainerStatuses || [];
+      const restoreContainer = initContainers.find(c => c.name === 'devworkspace-backup-restore');
+      if (restoreContainer?.state?.terminated?.message) {
+        console.error(`     Termination message: ${restoreContainer.state.terminated.message}`);
+      }
+    }
+  }
+}
+
 function verifyWorkspaceRestore(backedUpWorkspaces) {
   console.log(`Starting restore verification for ${backedUpWorkspaces.length} backed up workspaces`);
 
@@ -772,7 +821,10 @@ function verifyWorkspaceRestore(backedUpWorkspaces) {
           status[idx].done = true;
           failCount++;
           restoreWorkspacesFailed.add(1);
+          const failureMessage = dw.status?.message || 'No error message available';
           console.error(`  ❌ ${ws.namespace}/${ws.name} failed`);
+          console.error(`     Reason: ${failureMessage}`);
+          captureRestoreFailureLogs(ws.namespace, ws.name);
         }
       }
     });
@@ -786,6 +838,7 @@ function verifyWorkspaceRestore(backedUpWorkspaces) {
       failCount++;
       restoreWorkspacesFailed.add(1);
       console.error(`  ❌ ${ws.namespace}/${ws.name} timed out (${ws.phase})`);
+      captureRestoreFailureLogs(ws.namespace, ws.name);
     }
   });
 
