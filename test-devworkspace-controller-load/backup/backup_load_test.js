@@ -471,6 +471,7 @@ function verifyBackupCoverage(devWorkspaces) {
         namespace: dw.metadata.namespace,
         workspaceId: dwId,
         originalSpec: dw.spec,
+        originalLabels: dw.metadata.labels,
       });
     }
   }
@@ -759,13 +760,22 @@ function verifyWorkspaceRestore(backedUpWorkspaces) {
     if (restoreSpec.template.projects) delete restoreSpec.template.projects;
     restoreSpec.started = true;
 
+    // Preserve original labels to ensure cleanup finds these workspaces
+    const metadata = {
+      name: workspace.name,
+      namespace: workspace.namespace
+    };
+    if (workspace.originalLabels) {
+      metadata.labels = workspace.originalLabels;
+    }
+
     return {
       method: 'POST',
       url: `${apiServer}/apis/workspace.devfile.io/v1alpha2/namespaces/${workspace.namespace}/devworkspaces`,
       body: JSON.stringify({
         apiVersion: 'workspace.devfile.io/v1alpha2',
         kind: 'DevWorkspace',
-        metadata: { name: workspace.name, namespace: workspace.namespace },
+        metadata: metadata,
         spec: restoreSpec
       }),
       params: { headers }
