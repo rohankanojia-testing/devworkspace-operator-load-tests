@@ -74,7 +74,7 @@ echo ""
 echo "🏗️  Step 2: Preparing directories on nodes..."
 for NODE in $NODES; do
     echo "  🔓 Creating $PVS_PER_NODE_CALC directories on $NODE..."
-    kubectl debug node/$NODE -- chroot /host /bin/bash -c "
+    kubectl debug node/$NODE --image=registry.access.redhat.com/ubi8/ubi-minimal -- chroot /host /bin/bash -c "
         mkdir -p $BASE_DIR/$NODE/pv-{1..$PVS_PER_NODE_CALC} && \
         chmod -R 777 $BASE_DIR && \
         chcon -R -t container_file_t $BASE_DIR 2>/dev/null || true" 2>&1 | grep -v "Temporary namespace" || true
