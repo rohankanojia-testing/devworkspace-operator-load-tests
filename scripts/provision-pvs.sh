@@ -74,12 +74,26 @@ echo ""
 echo "🏗️  Step 2: Preparing directories on nodes..."
 for NODE in $NODES; do
     echo "  🔓 Creating $PVS_PER_NODE_CALC directories on $NODE..."
+
+    # Use seq to generate directory list (brace expansion doesn't work with variables)
     kubectl debug node/$NODE --image=registry.access.redhat.com/ubi8/ubi-minimal -- chroot /host /bin/bash -c "
-        mkdir -p $BASE_DIR/$NODE/pv-{1..$PVS_PER_NODE_CALC} && \
+        for i in \$(seq 1 $PVS_PER_NODE_CALC); do
+            mkdir -p $BASE_DIR/$NODE/pv-\$i
+        done && \
         chmod -R 777 $BASE_DIR && \
-        chcon -R -t container_file_t $BASE_DIR 2>/dev/null || true" 2>&1 | grep -v "Temporary namespace" || true
+        chcon -R -t container_file_t $BASE_DIR 2>/dev/null || true" 2>&1 | grep -qv "Temporary namespace" || true
+
+    # Verify directories were created
+    VERIFY_COUNT=$(kubectl debug node/$NODE --image=registry.access.redhat.com/ubi8/ubi-minimal -- chroot /host /bin/bash -c "ls -1d $BASE_DIR/$NODE/pv-* 2>/dev/null | wc -l" 2>&1 | grep -v "Temporary\|Removing\|Creating" | tail -1 || echo "0")
+
+    if [ "$VERIFY_COUNT" -lt "$PVS_PER_NODE_CALC" ]; then
+        echo "❌ ERROR: Only created $VERIFY_COUNT/$PVS_PER_NODE_CALC directories on $NODE"
+        exit 1
+    fi
+
+    echo "  ✅ Verified $VERIFY_COUNT directories on $NODE"
 done
-echo "✅ Directories prepared on all nodes"
+echo "✅ All directories prepared on all nodes"
 echo ""
 
 # Step 3: Configure StorageClass
