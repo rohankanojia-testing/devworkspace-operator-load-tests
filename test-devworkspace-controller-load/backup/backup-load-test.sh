@@ -67,8 +67,9 @@ echo "========================================"
 
 kubectl create namespace "$LOAD_TEST_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-# Calculate VUs: for small counts use same as devworkspaces, otherwise use 1/4
+# Calculate VUs: for small counts use same as devworkspaces, otherwise use 1/4, capped at 100
 MAX_VUS=$(( MAX_DEVWORKSPACES < 10 ? MAX_DEVWORKSPACES : MAX_DEVWORKSPACES / 4 ))
+[[ $MAX_VUS -gt 100 ]] && MAX_VUS=100
 [[ $MAX_VUS -lt 1 ]] && MAX_VUS=1
 
 SKIP_CLEANUP=true bash "${SCRIPT_DIR}/../runk6.sh" \
