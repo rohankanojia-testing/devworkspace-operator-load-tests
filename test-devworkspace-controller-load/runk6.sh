@@ -33,6 +33,7 @@ CHE_NAMESPACE=""  # Auto-detected based on platform
 CHE_CLUSTER_NAME=""  # Auto-discovered from cluster
 TEST_CERTIFICATES_COUNT="750" # ConfigMap limit is 1048576 bytes; leave room for ~156 system certs
 SKIP_CLEANUP="${SKIP_CLEANUP:-false}"  # Skip cleanup after load test (default: false)
+TOKEN_TTL="16h"
 
 # ----------- Helper Functions -----------
 
@@ -226,7 +227,7 @@ EOF
 
 generate_token_and_api_url() {
   echo "🔐 Generating token..."
-  KUBE_TOKEN=$(kubectl create token "${SA_NAME}" -n "${LOAD_TEST_NAMESPACE}")
+  KUBE_TOKEN=$(kubectl create token "${SA_NAME}" -n "${LOAD_TEST_NAMESPACE}" --duration="${TOKEN_TTL})
 
   echo "🌐 Getting Kubernetes API server URL..."
   KUBE_API=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')

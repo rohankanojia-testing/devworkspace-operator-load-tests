@@ -465,7 +465,7 @@ delete_namespace() {
 
 generate_token_and_api_url() {
   log_info "Generating token..."
-  KUBE_TOKEN=$(kubectl create token "${SA_NAME}" -n "${LOAD_TEST_NAMESPACE}")
+  KUBE_TOKEN=$(kubectl create token "${SA_NAME}" -n "${LOAD_TEST_NAMESPACE}" --duration="${TOKEN_TTL})
 
   log_info "Getting Kubernetes API server URL..."
   KUBE_API=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')

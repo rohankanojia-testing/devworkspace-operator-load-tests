@@ -15,7 +15,7 @@ DEVWORKSPACE_LINK="https://gist.githubusercontent.com/rohanKanojia/a68f7079c6045
 DW_API_GROUP="workspace.devfile.io"
 DW_RESOURCE="devworkspaces"
 CLUSTER_ROLE_NAME="k6-devworkspace-webhook-server-role"
-TOKEN_TTL="15m"
+TOKEN_TTL="6h"
 TOKENS_FILE=""
 K6_SCRIPT="${K6_SCRIPT:-test-devworkspace-webhook-server-load/devworkspace_webhook_loadtest.js}"
 
