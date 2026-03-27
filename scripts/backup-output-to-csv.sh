@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Parse k6 backup load test output and convert metrics to CSV
 #
-# Usage: cat k6-backup-output.txt | ./backup-output-to-csv.sh --config-type correct --namespaces single --restore true
-#        echo "$K6_OUTPUT" | ./backup-output-to-csv.sh --config-type openshift-internal --namespaces separate --restore false
+# Usage: cat k6-backup-output.txt | ./backup-output-to-csv.sh --config-type "external registry correct" --dw-target 2500
+#        echo "$K6_OUTPUT" | ./backup-output-to-csv.sh --config-type "openshift-internal correct" --dw-target 1500
 
 # Parse arguments
 CONFIG_TYPE=""

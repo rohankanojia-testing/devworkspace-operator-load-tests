@@ -66,4 +66,4 @@ INPUT=$(cat)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Call the main script
-echo "$INPUT" | "${SCRIPT_DIR}/backup-output-to-csv.sh" --config-type "$CONFIG_TYPE"
+echo "$INPUT" | "${SCRIPT_DIR}/backup-output-to-csv.sh" --config-type "$CONFIG_TYPE" --dw-target "$DW_TARGET"
