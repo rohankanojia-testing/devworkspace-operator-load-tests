@@ -5,41 +5,65 @@ set -euo pipefail
 #
 # Usage: ./paste-to-csv-backup.sh
 
-echo "Paste your backup k6 output below, then press Ctrl+D (EOF) when done:"
+# Prompt for test configuration FIRST (before reading stdin)
+echo "Select registry type:"
+echo "  1) external registry"
+echo "  2) openshift-internal"
+read -p "Enter choice [1-2]: " REGISTRY_CHOICE
+
+case $REGISTRY_CHOICE in
+    1)
+        REGISTRY_TYPE="external registry"
+        ;;
+    2)
+        REGISTRY_TYPE="openshift-internal"
+        ;;
+    *)
+        echo "Invalid choice. Defaulting to 'external registry'" >&2
+        REGISTRY_TYPE="external registry"
+        ;;
+esac
+
+echo ""
+echo "Select DWOC config type:"
+echo "  1) correct"
+echo "  2) incorrect"
+read -p "Enter choice [1-2]: " CONFIG_CHOICE
+
+case $CONFIG_CHOICE in
+    1)
+        DWOC_CONFIG="correct"
+        ;;
+    2)
+        DWOC_CONFIG="incorrect"
+        ;;
+    *)
+        echo "Invalid choice. Defaulting to 'correct'" >&2
+        DWOC_CONFIG="correct"
+        ;;
+esac
+
+# Build config type string (e.g., "external registry correct")
+CONFIG_TYPE="${REGISTRY_TYPE} ${DWOC_CONFIG}"
+
+echo ""
+read -p "Enter DW Target (max DevWorkspaces): " DW_TARGET
+
+# Validate DW_TARGET is a number
+if ! [[ "$DW_TARGET" =~ ^[0-9]+$ ]]; then
+    echo "Invalid DW Target. Using default: 0" >&2
+    DW_TARGET="0"
+fi
+
+echo ""
+echo "Now paste your k6 backup output below, then press Ctrl+D (EOF) when done:"
 echo "---"
 
 # Read all input until EOF (Ctrl+D)
 INPUT=$(cat)
 
-# Prompt for test configuration
-echo ""
-echo "Select DWOC config type:"
-echo "  1) correct (proper registry configuration)"
-echo "  2) incorrect (wrong credentials - expects backup failures)"
-echo "  3) openshift-internal (uses OpenShift internal registry)"
-read -p "Enter choice [1-3]: " CONFIG_CHOICE
-
-case $CONFIG_CHOICE in
-    1)
-        CONFIG_TYPE="correct"
-        ;;
-    2)
-        CONFIG_TYPE="incorrect"
-        ;;
-    3)
-        CONFIG_TYPE="openshift-internal"
-        ;;
-    *)
-        echo "Invalid choice. Defaulting to 'correct'" >&2
-        CONFIG_TYPE="correct"
-        ;;
-esac
-
-read -p "Enter namespace mode (single or separate): " NAMESPACES
-read -p "Was restore verification enabled? (true or false): " RESTORE
-
 # Get the script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Call the main script
-echo "$INPUT" | "${SCRIPT_DIR}/backup-output-to-csv.sh" --config-type "$CONFIG_TYPE" --namespaces "$NAMESPACES" --restore "$RESTORE"
+echo "$INPUT" | "${SCRIPT_DIR}/backup-output-to-csv.sh" --config-type "$CONFIG_TYPE"
