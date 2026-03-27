@@ -36,6 +36,7 @@ WAIT_FOR_READY="true"  # Wait for ALL DevWorkspaces to be ready before starting 
 WAIT_TIMEOUT_MINUTES="30"  # Maximum time to wait for DevWorkspaces to be ready
 BACKUP_SCHEDULE=""  # Override backup schedule (e.g., "*/5 * * * *"), empty means don't change
 ORIGINAL_BACKUP_SCHEDULE=""  # Store original schedule for restoration
+TOKEN_TTL="6h"  # ServiceAccount token duration for backup load tests
 MIN_KUBECTL_VERSION="1.24.0"
 MIN_K6_VERSION="1.1.0"
 
