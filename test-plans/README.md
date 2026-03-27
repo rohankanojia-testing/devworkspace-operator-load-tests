@@ -280,6 +280,47 @@ sed -i 's/quay.io\/CHANGEME/quay.io\/yourusername/g' \
 
 **For detailed documentation, see:** [BACKUP_LOAD_TESTING.md](../test-devworkspace-controller-load/BACKUP_LOAD_TESTING.md)
 
+### 9. `webhook-crc-test-plan.json` - Webhook Server CRC/Local Testing
+Quick webhook server load tests for local development clusters (CRC, Minikube, etc.):
+- 50 users - smoke test - enabled
+- 100 users - light load - enabled
+- 150 users - medium load - enabled
+- 200 users - moderate load - enabled
+
+**Use this to:**
+- Validate webhook server on resource-constrained environments
+- Quick pre-release webhook validation
+- Test webhook admission control and validation logic
+
+**Usage:**
+```bash
+./scripts/run_all_webhook_loadtests.sh test-plans/webhook-crc-test-plan.json
+```
+
+### 10. `webhook-performancelabs-test-plan.json` - Webhook Server Performance Testing
+Full-scale webhook server load tests for performance lab clusters:
+- 100 users - baseline - enabled
+- 200 users - moderate load - enabled
+- 300 users - high load - enabled
+- 400 users - stress test - enabled
+- 500 users - maximum load - enabled
+
+**What makes this different:**
+- Tests webhook server under high concurrent load
+- Validates admission control performance
+- Tests identity immutability validation at scale
+- Monitors exec permission enforcement under load
+
+**Usage:**
+```bash
+./scripts/run_all_webhook_loadtests.sh test-plans/webhook-performancelabs-test-plan.json
+```
+
+**Prerequisites for webhook tests:**
+- DevWorkspace Operator installed in the cluster
+- Webhook server deployed and configured
+- Sufficient cluster resources based on user count
+
 ## Environment Variables
 
 The script respects the same environment variables:

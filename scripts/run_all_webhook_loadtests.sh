@@ -8,7 +8,11 @@
 # automated cleanup between tests and generates comprehensive reports.
 #
 # USAGE:
-#   ./scripts/run_all_webhook_loadtests.sh
+#   ./scripts/run_all_webhook_loadtests.sh [TEST_PLAN_FILE]
+#
+# ARGUMENTS:
+#   TEST_PLAN_FILE            - Optional JSON test plan file
+#                               If not provided, uses default test plan defined in script
 #
 # ENVIRONMENT VARIABLES:
 #   OUTPUT_DIR                - Base directory for outputs (default: outputs/)
@@ -17,6 +21,12 @@
 #   CLEANUP_MAX_WAIT          - Max time for cleanup in seconds (default: 1800 = 30m)
 #
 # EXAMPLES:
+#   # Run with default test plan (defined in script)
+#   ./scripts/run_all_webhook_loadtests.sh
+#
+#   # Run with custom test plan from JSON file
+#   ./scripts/run_all_webhook_loadtests.sh test-plans/webhook-crc-test-plan.json
+#
 #   # Run with custom output directory
 #   OUTPUT_DIR=./my-results ./scripts/run_all_webhook_loadtests.sh
 #
@@ -46,6 +56,37 @@ CLEANUP_MAX_WAIT=1800   # 30 minutes for cleanup
 TEST_TIMEOUT=3600       # 1 hour per test
 SKIP_CLEANUP="${SKIP_CLEANUP:-false}"
 
+# Test plan file (optional)
+TEST_PLAN_FILE="${1:-}"
+USE_JSON_PLAN=false
+
+# Check if JSON plan file is provided
+if [ -n "$TEST_PLAN_FILE" ]; then
+    USE_JSON_PLAN=true
+
+    # Check for jq
+    if ! command -v jq &> /dev/null; then
+        echo "ERROR: jq is required for JSON test plans but not installed."
+        echo "Install it with: brew install jq (macOS) or apt-get install jq (Linux)"
+        echo ""
+        echo "Alternatively, run without arguments to use the default hardcoded test plan:"
+        echo "  ./scripts/run_all_webhook_loadtests.sh"
+        exit 1
+    fi
+
+    # Validate test plan file exists
+    if [ ! -f "$TEST_PLAN_FILE" ]; then
+        echo "ERROR: Test plan file not found: $TEST_PLAN_FILE"
+        exit 1
+    fi
+
+    # Validate JSON
+    if ! jq empty "$TEST_PLAN_FILE" 2>/dev/null; then
+        echo "ERROR: Invalid JSON in test plan file: $TEST_PLAN_FILE"
+        exit 1
+    fi
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -64,6 +105,14 @@ PLANNING_MODE=true
 echo "========================================================"
 echo "Starting webhook load test suite at $(date)"
 echo "========================================================"
+
+if [ "$USE_JSON_PLAN" == "true" ]; then
+    echo "Mode: JSON test plan"
+    echo "Test plan file: $TEST_PLAN_FILE"
+else
+    echo "Mode: Default hardcoded test plan"
+fi
+
 mkdir -p "$LOG_DIR"
 mkdir -p "$OUTPUT_DIR"
 
@@ -139,13 +188,10 @@ wait_for_cleanup() {
     fi
 
     echo -e "${BLUE}Waiting for environment cleanup...${NC}"
-    echo "Conditions:"
-    echo "  1) Namespace 'dw-webhook-loadtest' absent"
-    echo "  2) All webhook loadtest ClusterRoleBindings deleted"
-    echo "--------------------------------------------------------"
 
     local start_time=$(date +%s)
     local cleanup_attempt=0
+    local first_cleanup=true
 
     while true; do
         local now=$(date +%s)
@@ -159,10 +205,33 @@ wait_for_cleanup() {
 
         # --- Delete webhook loadtest namespace if exists ---
         local ns_exists=0
-        if oc get ns dw-webhook-loadtest --no-headers 2>/dev/null | grep -q dw-webhook-loadtest; then
+        local ns_status=""
+        ns_status=$(oc get ns dw-webhook-loadtest --no-headers 2>/dev/null | awk '{print $2}' || echo "")
+
+        if [[ -n "$ns_status" ]]; then
             ns_exists=1
-            echo -e "${YELLOW}Found dw-webhook-loadtest namespace. Deleting...${NC}"
-            oc delete ns dw-webhook-loadtest --wait=false 2>/dev/null || true
+
+            if [[ "$ns_status" == "Terminating" ]]; then
+                # Force delete any remaining pods
+                local pod_count=$(oc get pods -n dw-webhook-loadtest --no-headers 2>/dev/null | wc -l || echo 0)
+                if [[ $pod_count -gt 0 ]]; then
+                    oc delete pods --all -n dw-webhook-loadtest --grace-period=0 --force >/dev/null 2>&1 || true
+                fi
+
+                # If stuck for more than 60 seconds total elapsed time, force finalize
+                if [[ $elapsed -gt 60 ]]; then
+                    if [[ $first_cleanup == true ]]; then
+                        echo -e "${YELLOW}Namespace stuck in Terminating state, force finalizing...${NC}"
+                    fi
+                    oc get ns dw-webhook-loadtest -o json | \
+                        jq 'del(.spec.finalizers)' | \
+                        oc replace --raw "/api/v1/namespaces/dw-webhook-loadtest/finalize" -f - >/dev/null 2>&1 || true
+                fi
+            else
+                if [[ $first_cleanup == true ]]; then
+                    oc delete ns dw-webhook-loadtest --wait=false >/dev/null 2>&1 || true
+                fi
+            fi
         fi
 
         # --- Delete leftover ClusterRoleBindings ---
@@ -171,8 +240,7 @@ wait_for_cleanup() {
         local crb_count=0
         if [[ -n "$crb_list" ]]; then
             crb_count=$(echo "$crb_list" | wc -l)
-            echo -e "${YELLOW}Found $crb_count leftover ClusterRoleBindings. Deleting...${NC}"
-            oc delete clusterrolebinding -l app=devworkspace-webhook-server-loadtest --ignore-not-found 2>/dev/null || true
+            oc delete clusterrolebinding -l app=devworkspace-webhook-server-loadtest --ignore-not-found >/dev/null 2>&1 || true
         fi
 
         # --- Delete leftover ClusterRoles ---
@@ -181,24 +249,17 @@ wait_for_cleanup() {
         local cr_count=0
         if [[ -n "$cr_list" ]]; then
             cr_count=$(echo "$cr_list" | wc -l)
-            echo -e "${YELLOW}Found $cr_count leftover ClusterRoles. Deleting...${NC}"
-            oc delete clusterrole -l app=devworkspace-webhook-server-loadtest --ignore-not-found 2>/dev/null || true
+            oc delete clusterrole -l app=devworkspace-webhook-server-loadtest --ignore-not-found >/dev/null 2>&1 || true
         fi
 
         # --- All conditions satisfied ---
         if [ "$ns_exists" -eq 0 ] && [ "$crb_count" -eq 0 ] && [ "$cr_count" -eq 0 ]; then
-            echo -e "${GREEN}Cleanup complete after ${elapsed}s (${cleanup_attempt} attempts)${NC}"
+            echo -e "${GREEN}Cleanup complete (${elapsed}s)${NC}"
             echo "--------------------------------------------------------"
             return 0
         fi
 
-        # --- Status output ---
-        echo "Cleanup attempt #${cleanup_attempt} (elapsed ${elapsed}s):"
-        echo "  - dw-webhook-loadtest ns: $ns_exists"
-        echo "  - ClusterRoleBindings: $crb_count"
-        echo "  - ClusterRoles: $cr_count"
-
-        echo "Retrying in ${POLL_INTERVAL}s..."
+        first_cleanup=false
         sleep $POLL_INTERVAL
     done
 }
@@ -336,6 +397,11 @@ generate_summary_report() {
         echo "========================================================"
         echo "Webhook Load Test Suite Summary"
         echo "========================================================"
+        if [ "$USE_JSON_PLAN" == "true" ]; then
+            echo "Test Plan: $TEST_PLAN_FILE"
+        else
+            echo "Test Plan: Default (hardcoded)"
+        fi
         echo "Started: $(head -1 "$RUN_DIR/test_suite.log" 2>/dev/null || echo 'N/A')"
         echo "Completed: $(date)"
         echo "Output Directory: $RUN_DIR"
@@ -408,6 +474,105 @@ add_custom_test() {
 
 
 #############################################
+#      LOAD TEST PLAN FROM JSON FILE        #
+#############################################
+load_test_plan_from_json() {
+    if [ "$USE_JSON_PLAN" != "true" ]; then
+        return
+    fi
+
+    echo "Loading test plan from: $TEST_PLAN_FILE"
+
+    # Load standard tests
+    local test_count=$(jq '.tests | length' "$TEST_PLAN_FILE")
+    echo "Found $test_count standard tests in plan"
+
+    for ((i=0; i<test_count; i++)); do
+        local enabled=$(jq -r ".tests[$i].enabled" "$TEST_PLAN_FILE")
+
+        if [ "$enabled" != "true" ]; then
+            continue
+        fi
+
+        local num_users=$(jq -r ".tests[$i].number_of_users" "$TEST_PLAN_FILE")
+
+        # Add to plan
+        TEST_PLAN+=("${num_users}users|$num_users users|Default timeout")
+    done
+
+    # Load custom tests
+    local custom_count=$(jq '.custom_tests | length' "$TEST_PLAN_FILE" 2>/dev/null || echo "0")
+    if [ "$custom_count" -gt 0 ]; then
+        echo "Found $custom_count custom tests in plan"
+
+        for ((i=0; i<custom_count; i++)); do
+            local enabled=$(jq -r ".custom_tests[$i].enabled" "$TEST_PLAN_FILE")
+
+            if [ "$enabled" != "true" ]; then
+                continue
+            fi
+
+            local name=$(jq -r ".custom_tests[$i].name" "$TEST_PLAN_FILE")
+
+            # Add to plan
+            TEST_PLAN+=("$name|Custom configuration|N/A")
+        done
+    fi
+
+    if [ ${#TEST_PLAN[@]} -eq 0 ]; then
+        echo "WARNING: No enabled tests found in test plan"
+        echo "Please enable at least one test in $TEST_PLAN_FILE"
+        exit 1
+    fi
+
+    echo "Loaded ${#TEST_PLAN[@]} enabled tests"
+}
+
+# Execute tests from JSON file
+execute_tests_from_json() {
+    if [ "$USE_JSON_PLAN" != "true" ]; then
+        return
+    fi
+
+    # Execute standard tests
+    local test_count=$(jq '.tests | length' "$TEST_PLAN_FILE")
+
+    for ((i=0; i<test_count; i++)); do
+        local enabled=$(jq -r ".tests[$i].enabled" "$TEST_PLAN_FILE")
+
+        if [ "$enabled" != "true" ]; then
+            continue
+        fi
+
+        local num_users=$(jq -r ".tests[$i].number_of_users" "$TEST_PLAN_FILE")
+
+        # Generate test name
+        local test_name="${num_users}users"
+
+        # Construct ARGS
+        local args="--number-of-users $num_users"
+
+        run_test "$test_name" "$args"
+    done
+
+    # Execute custom tests
+    local custom_count=$(jq '.custom_tests | length' "$TEST_PLAN_FILE" 2>/dev/null || echo "0")
+
+    for ((i=0; i<custom_count; i++)); do
+        local enabled=$(jq -r ".custom_tests[$i].enabled" "$TEST_PLAN_FILE")
+
+        if [ "$enabled" != "true" ]; then
+            continue
+        fi
+
+        local name=$(jq -r ".custom_tests[$i].name" "$TEST_PLAN_FILE")
+        local args=$(jq -r ".custom_tests[$i].args" "$TEST_PLAN_FILE")
+
+        run_test "$name" "$args"
+    done
+}
+
+#############################################
 #           DEFINE TEST SUITE HERE          #
 #############################################
 
@@ -453,7 +618,7 @@ echo "$(date)" > "$RUN_DIR/test_suite.log"
 # NOTE: Define your tests ONCE in the run_tests() function below.
 #       They will be collected for the plan preview, then executed.
 
-# Function to define all tests
+# Function to define all tests (used when no JSON file is provided)
 run_tests() {
     add_webhook_test "100users" 100
     add_webhook_test "200users" 200
@@ -464,7 +629,11 @@ run_tests() {
 
 # First pass: collect test plan
 PLANNING_MODE=true
-run_tests
+if [ "$USE_JSON_PLAN" == "true" ]; then
+    load_test_plan_from_json
+else
+    run_tests
+fi
 
 # Show test plan
 show_test_plan
@@ -480,7 +649,11 @@ echo ""
 
 # Second pass: execute tests
 PLANNING_MODE=false
-run_tests
+if [ "$USE_JSON_PLAN" == "true" ]; then
+    execute_tests_from_json
+else
+    run_tests
+fi
 
 # Calculate total suite duration
 SUITE_END=$(date +%s)

@@ -1,0 +1,38 @@
+{
+  "description": "Webhook Server Load Test Plan - Performance Labs with high scale",
+  "tests": [
+    {
+      "number_of_users": 100,
+      "enabled": true,
+      "description": "100 concurrent users"
+    },
+    {
+      "number_of_users": 200,
+      "enabled": true,
+      "description": "200 concurrent users"
+    },
+    {
+      "number_of_users": 300,
+      "enabled": true,
+      "description": "300 concurrent users"
+    },
+    {
+      "number_of_users": 400,
+      "enabled": true,
+      "description": "400 concurrent users"
+    },
+    {
+      "number_of_users": 500,
+      "enabled": true,
+      "description": "500 concurrent users"
+    }
+  ],
+  "custom_tests": [
+    {
+      "name": "custom_stress_test",
+      "args": "--number-of-users 600 --dev-workspace-ready-timeout-in-seconds 1200",
+      "enabled": false,
+      "description": "Extended stress test with 600 users (disabled by default)"
+    }
+  ]
+}

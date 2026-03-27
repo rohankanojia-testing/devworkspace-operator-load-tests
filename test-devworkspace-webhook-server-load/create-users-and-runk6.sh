@@ -81,7 +81,16 @@ parse_arguments() {
 
 cleanup() {
   [[ -n "${TOKENS_FILE:-}" && -f "${TOKENS_FILE}" ]] && rm -f "${TOKENS_FILE}"
-  log "🧹 Cleaning up namespace ${LOAD_TEST_NAMESPACE}"
+
+  log "🧹 Force deleting all pods in namespace ${LOAD_TEST_NAMESPACE}"
+  # Force delete all pods immediately (load test - no graceful shutdown needed)
+  $KUBECTL delete pods --all -n "${LOAD_TEST_NAMESPACE}" --force --grace-period=0 --ignore-not-found 2>/dev/null || true
+
+  log "🧹 Deleting DevWorkspaces in namespace ${LOAD_TEST_NAMESPACE}"
+  # Delete all DevWorkspaces (will be faster now that pods are gone)
+  $KUBECTL delete devworkspaces --all -n "${LOAD_TEST_NAMESPACE}" --ignore-not-found --wait=false 2>/dev/null || true
+
+  log "🧹 Deleting namespace ${LOAD_TEST_NAMESPACE}"
   $KUBECTL delete ns "${LOAD_TEST_NAMESPACE}" --ignore-not-found
 }
 

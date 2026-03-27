@@ -1,0 +1,33 @@
+{
+  "description": "Webhook Server Load Test Plan - CRC/Local cluster with minimal scale",
+  "tests": [
+    {
+      "number_of_users": 50,
+      "enabled": true,
+      "description": "50 concurrent users - smoke test"
+    },
+    {
+      "number_of_users": 100,
+      "enabled": true,
+      "description": "100 concurrent users - light load"
+    },
+    {
+      "number_of_users": 150,
+      "enabled": true,
+      "description": "150 concurrent users - medium load"
+    },
+    {
+      "number_of_users": 200,
+      "enabled": true,
+      "description": "200 concurrent users - moderate load"
+    }
+  ],
+  "custom_tests": [
+    {
+      "name": "custom_quick_test",
+      "args": "--number-of-users 25 --dev-workspace-ready-timeout-in-seconds 600",
+      "enabled": false,
+      "description": "Quick validation test with 25 users"
+    }
+  ]
+}
