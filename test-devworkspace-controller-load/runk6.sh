@@ -227,7 +227,7 @@ EOF
 
 generate_token_and_api_url() {
   echo "🔐 Generating token..."
-  KUBE_TOKEN=$(kubectl create token "${SA_NAME}" -n "${LOAD_TEST_NAMESPACE}" --duration="${TOKEN_TTL})
+  KUBE_TOKEN=$(kubectl create token "${SA_NAME}" -n "${LOAD_TEST_NAMESPACE}" --duration="${TOKEN_TTL}")
 
   echo "🌐 Getting Kubernetes API server URL..."
   KUBE_API=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
