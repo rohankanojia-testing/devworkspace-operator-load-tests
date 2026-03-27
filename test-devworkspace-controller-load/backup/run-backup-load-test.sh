@@ -522,6 +522,15 @@ run_k6_binary_test() {
   INITIAL_OPERATOR_RESTARTS=$(get_initial_pod_restart_counts "$DWO_NAMESPACE" "app.kubernetes.io/name=devworkspace-controller")
   log_info "Initial operator restart counts: $INITIAL_OPERATOR_RESTARTS"
 
+  # Get current backup schedule from DWOC
+  CURRENT_BACKUP_SCHEDULE=$(get_backup_schedule)
+  if [[ -n "$CURRENT_BACKUP_SCHEDULE" ]]; then
+    log_info "Current backup schedule: $CURRENT_BACKUP_SCHEDULE"
+  else
+    log_warning "Could not retrieve backup schedule - monitoring will use full duration"
+    CURRENT_BACKUP_SCHEDULE=""
+  fi
+
   if IN_CLUSTER='false' \
     KUBE_TOKEN="${KUBE_TOKEN}" \
     KUBE_API="${KUBE_API}" \
@@ -530,6 +539,7 @@ run_k6_binary_test() {
     SEPARATE_NAMESPACES="${SEPARATE_NAMESPACES}" \
     LOAD_TEST_NAMESPACE="${LOAD_TEST_NAMESPACE}" \
     BACKUP_MONITOR_DURATION_MINUTES="${BACKUP_MONITOR_DURATION_MINUTES}" \
+    BACKUP_SCHEDULE="${CURRENT_BACKUP_SCHEDULE}" \
     VERIFY_RESTORE="${VERIFY_RESTORE}" \
     MAX_RESTORE_SAMPLES="${MAX_RESTORE_SAMPLES}" \
     INITIAL_ETCD_RESTARTS="${INITIAL_ETCD_RESTARTS}" \

@@ -37,6 +37,7 @@ const backupMonitorDurationMinutes = Number(__ENV.BACKUP_MONITOR_DURATION_MINUTE
 const dwocConfigType = __ENV.DWOC_CONFIG_TYPE || 'correct';
 const verifyRestore = __ENV.VERIFY_RESTORE !== 'false'; // Default to true, can be disabled with VERIFY_RESTORE=false
 const maxRestoreSamples = Number(__ENV.MAX_RESTORE_SAMPLES || 10); // Maximum number of workspaces to restore for verification
+const backupSchedule = __ENV.BACKUP_SCHEDULE || ""; // Cron schedule for backup jobs (e.g., "*/10 * * * *")
 const backupJobLabel = "controller.devfile.io/backup-job=true";
 let ETCD_NAMESPACE = 'openshift-etcd';
 let ETCD_POD_NAME_PATTERN = 'etcd';
@@ -151,6 +152,29 @@ export function runBackupLoadTest(data) {
   } else {
     console.log("\nℹ️  Restore verification is disabled (VERIFY_RESTORE=false)");
   }
+}
+
+// Parse cron schedule to extract interval in minutes
+// Supports simple patterns like "*/N * * * *" (every N minutes)
+function parseCronScheduleInterval(cronSchedule) {
+  if (!cronSchedule || cronSchedule === "") {
+    return 0; // No schedule provided
+  }
+
+  // Parse patterns like "*/10 * * * *" (every 10 minutes)
+  const everyNMinutesPattern = /^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*/;
+  const match = cronSchedule.match(everyNMinutesPattern);
+
+  if (match) {
+    const intervalMinutes = parseInt(match[1], 10);
+    console.log(`Parsed backup schedule "${cronSchedule}" -> interval: ${intervalMinutes} minutes`);
+    return intervalMinutes;
+  }
+
+  // Could add more patterns here (e.g., "0 */2 * * *" for every 2 hours)
+  // For now, return 0 for unparseable schedules
+  console.warn(`Could not parse backup schedule "${cronSchedule}" - using full monitoring duration`);
+  return 0;
 }
 
 function stopWorkspacesAndMonitorBackups(data) {
@@ -387,6 +411,19 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
   let previousCumulativeTotal = 0;
   let previousCumulativePods = 0;
 
+  // Parse backup schedule to determine expected interval
+  const scheduleIntervalMinutes = parseCronScheduleInterval(backupSchedule);
+  const noJobTimeoutMinutes = scheduleIntervalMinutes > 0 ? scheduleIntervalMinutes + 5 : 0; // Wait interval + 5 min buffer
+  let lastNewJobTime = Date.now(); // Track when we last saw a new job
+  let noJobTimeoutReported = false;
+
+  if (scheduleIntervalMinutes > 0) {
+    console.log(`Backup schedule interval: ${scheduleIntervalMinutes} minutes`);
+    console.log(`Will exit early if no new jobs created for ${noJobTimeoutMinutes} minutes (interval + 5 min buffer)\n`);
+  } else {
+    console.log("No backup schedule detected - will monitor for full duration\n");
+  }
+
   while (Date.now() < endTime) {
     iteration++;
     const metrics = getBackupJobMetrics();
@@ -395,6 +432,7 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
     if (metrics.cumulativeTotal > previousCumulativeTotal) {
       backupJobsTotal.add(metrics.cumulativeTotal - previousCumulativeTotal);
       previousCumulativeTotal = metrics.cumulativeTotal;
+      lastNewJobTime = Date.now(); // Update last seen time
     }
 
     // Track new pods created (use cumulative pod count)
@@ -434,6 +472,38 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
       backupJobsFailed.add(metrics.cumulativeFailed);
 
       break;
+    }
+
+    // Check if we should exit early due to no new jobs being created
+    if (noJobTimeoutMinutes > 0 && !noJobTimeoutReported) {
+      const timeSinceLastNewJob = (Date.now() - lastNewJobTime) / 1000 / 60; // minutes
+
+      if (timeSinceLastNewJob >= noJobTimeoutMinutes) {
+        const totalJobs = metrics.cumulativeTotal;
+        console.log("");
+        console.log("⚠️  ============================================");
+        console.log(`⚠️  No new backup jobs created for ${timeSinceLastNewJob.toFixed(1)} minutes`);
+        console.log(`⚠️  Expected interval: ${scheduleIntervalMinutes} minutes`);
+        console.log(`⚠️  Timeout threshold: ${noJobTimeoutMinutes} minutes`);
+        console.log(`⚠️  Total jobs created: ${totalJobs}`);
+        console.log("⚠️  ============================================");
+        console.log("");
+
+        if (totalJobs === 0) {
+          console.log("❌ No backup jobs were ever created - backup schedule may be misconfigured");
+        } else {
+          console.log(`✅ ${totalJobs} backup jobs were created before stopping`);
+        }
+
+        console.log("Stopping monitoring early - backup job creation appears to have stopped");
+
+        // Record final cumulative counts before exiting
+        backupJobsSucceeded.add(metrics.cumulativeSucceeded);
+        backupJobsFailed.add(metrics.cumulativeFailed);
+
+        noJobTimeoutReported = true;
+        break;
+      }
     }
 
     sleep(monitorPollInterval);
