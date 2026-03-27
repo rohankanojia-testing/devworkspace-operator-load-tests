@@ -2,9 +2,11 @@
 set -euo pipefail
 
 # --- CONFIG ---
-BASE_DIR="/var/lib/hostpath-provisioner"
+# Changed from /var/lib/hostpath-provisioner to /tmp/hostpath-provisioner
+# to match hostpath deleter requirements (only supports /tmp/.+ paths)
+BASE_DIR="/tmp/hostpath-provisioner"
 STORAGE_CLASS="hostpath-sc"
-PV_SIZE="200Mi"
+PV_SIZE="10Mi"  # Reduced from 200Mi - sufficient for load testing
 PV_PER_NODE=750
 
 WORKLOAD_LABEL="devworkspace-load-test"
