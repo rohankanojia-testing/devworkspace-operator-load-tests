@@ -20,7 +20,8 @@ import {
 
 export const devWorkspacesReady = new Gauge('devworkspaces_ready');
 export const execAttempted = new Counter('exec_attempted');
-export const execSkipped = new Counter('exec_skipped_due_to_errors');
+export const execSkippedPodNotReady = new Counter('exec_skipped_pod_not_ready');
+export const execFailed = new Counter('exec_failed_total');
 export const execAllowed = new Counter('exec_allowed_total');
 export const execDenied = new Counter('exec_denied_total');
 export const execUnexpectedAllowed = new Counter('exec_unexpected_allowed_total');
@@ -81,8 +82,9 @@ export const options = {
 
         'webhook_pod_restarts_total': ['value == 0'],
 
-        // All workspaces must be ready - no skipped exec attempts allowed
-        'exec_skipped_due_to_errors': ['count == 0'],
+        // All workspaces must be ready - no failed exec attempts allowed
+        'exec_skipped_pod_not_ready': ['count == 0'],
+        'exec_failed_total': ['count == 0'],
 
         // Webhook timeout thresholds - fail if webhooks timeout (indicates saturation)
         'mutation_webhook_timeout_500': ['count == 0'],
@@ -175,7 +177,8 @@ export function handleSummary(data) {
         'devworkspaces_ready',
         // Execution metrics
         'exec_attempted',
-        'exec_skipped_due_to_errors',
+        'exec_skipped_pod_not_ready',
+        'exec_failed_total',
         'exec_allowed_total',
         'exec_denied_total',
         'exec_unexpected_allowed_total',
@@ -373,6 +376,7 @@ function checkExecResponse(res) {
 function checkExecPermission(headers, userName, namespace, dwName, shouldAllow = true) {
     const pod = getPodForDevWorkspace(K8S_API, headers, namespace, dwName);
     if (!pod || pod.status?.phase !== 'Running') {
+        execSkippedPodNotReady.add(1);
         return;
     }
 
@@ -386,7 +390,7 @@ function checkExecPermission(headers, userName, namespace, dwName, shouldAllow =
     const res = http.post(execUrl, null, { headers, timeout: '30s' });
     if (!res?.status) {
         console.error(`[ERROR] Failed to parse exec response: ${JSON.stringify(res)}`);
-        execSkipped.add(1);
+        execFailed.add(1);
         return;
     }
 
@@ -405,7 +409,7 @@ function checkExecPermission(headers, userName, namespace, dwName, shouldAllow =
 
     if (isWebhookTimeout) {
         validationWebhookTimeout.add(1);
-        execSkipped.add(1);
+        execFailed.add(1);
         return;
     }
 
@@ -418,7 +422,7 @@ function checkExecPermission(headers, userName, namespace, dwName, shouldAllow =
             execUnexpectedDenied.add(1);
         } else {
             // For Server Side errors, mark exec as skipped
-            execSkipped.add(1);
+            execFailed.add(1);
         }
     } else {
         if (!allowed && res.status === 403) {
@@ -428,7 +432,7 @@ function checkExecPermission(headers, userName, namespace, dwName, shouldAllow =
             console.error(`[SECURITY] Cross-user exec ALLOWED for ${dwName} for user ${userName}`);
         } else {
             // For Server Side errors, mark exec as skipped
-            execSkipped.add(1);
+            execFailed.add(1);
         }
     }
 
