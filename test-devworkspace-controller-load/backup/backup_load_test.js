@@ -44,7 +44,7 @@ let ETCD_NAMESPACE = 'openshift-etcd';
 let ETCD_POD_NAME_PATTERN = 'etcd';
 const ETCD_POD_SELECTOR = `app=${ETCD_POD_NAME_PATTERN}`;
 const OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=devworkspace-controller';
-const monitorPollInterval = 2; // seconds between monitoring polls
+const monitorPollInterval = 5; // seconds between monitoring polls
 
 // Parse initial restart counts from environment variables
 const initialEtcdRestarts = __ENV.INITIAL_ETCD_RESTARTS ? JSON.parse(__ENV.INITIAL_ETCD_RESTARTS) : {};
@@ -414,9 +414,6 @@ function getBackupJobMetrics() {
 function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryConfig) {
   const endTime = Date.now() + (durationMinutes * 60 * 1000);
 
-  // cache tokens per repo (avoid re-auth every loop)
-  const tokenCache = new Map();
-
   console.log("\nMonitoring backup jobs (registry-driven termination)...\n");
 
   while (Date.now() < endTime) {
@@ -443,37 +440,23 @@ function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryCon
     // ----------------------------------------
     // Registry check (source of truth)
     // ----------------------------------------
+    // List all repositories once instead of checking each individually
+    const allRepos = listAllRepositories(
+        registryConfig.registry,
+        registryConfig.username,
+        registryConfig.password
+    );
+
     let backedUpCount = 0;
+    if (allRepos) {
+      for (const dw of devWorkspaces) {
+        // Construct expected repo path: namespace/devworkspace-name
+        const expectedRepo = `${dw.metadata.namespace}/${dw.metadata.name}`;
 
-    for (const dw of devWorkspaces) {
-      // Construct repo path: namespace/devworkspace-name
-      const repo = `${dw.metadata.namespace}/${dw.metadata.name}`;
-
-      let token = tokenCache.get(repo);
-      if (!token) {
-        token = getQuayToken(
-            registryConfig.registry,
-            registryConfig.username,
-            registryConfig.password,
-            repo
-        );
-        if (token) {
-          tokenCache.set(repo, token);
+        // Check if this repo exists in the list
+        if (allRepos.includes(expectedRepo)) {
+          backedUpCount++;
         }
-      }
-
-      if (!token) continue;
-
-      const exists = checkArtifactExists(
-          registryConfig.registry,
-          registryConfig.username,
-          repo,
-          token,
-          registryConfig.expectedArtifactType
-      );
-
-      if (exists) {
-        backedUpCount++;
       }
     }
 
@@ -978,49 +961,19 @@ export function handleSummary(data) {
   return backupLoadTestSummaryReport;
 }
 
-// Cache tokens per repo (shared across iterations)
-const registryTokenCache = new Map();
-
-function getRegistryToken(registryConfig, repo) {
-  if (registryTokenCache.has(repo)) {
-    return registryTokenCache.get(repo);
-  }
-
-  const token = getQuayToken(
-      registryConfig.registry,
-      registryConfig.username,
-      registryConfig.password,
-      repo
-  );
-
-  if (token) {
-    registryTokenCache.set(repo, token);
-  }
-
-  return token;
-}
-
-function isWorkspaceBackedUp(dw, registryConfig) {
-  // Construct repo path: namespace/devworkspace-name
-  const repo = `${dw.metadata.namespace}/${dw.metadata.name}`;
-  const token = getRegistryToken(registryConfig, repo);
-
-  if (!token) return false;
-
-  return checkArtifactExists(
-      registryConfig.registry,
-      registryConfig.username,
-      repo,
-      token,
-      registryConfig.expectedArtifactType
-  );
-}
-
 function countBackedUpWorkspaces(devWorkspaces, registryConfig) {
-  let count = 0;
+  const allRepos = listAllRepositories(
+      registryConfig.registry,
+      registryConfig.username,
+      registryConfig.password
+  );
 
+  if (!allRepos) return 0;
+
+  let count = 0;
   for (const dw of devWorkspaces) {
-    if (isWorkspaceBackedUp(dw, registryConfig)) {
+    const expectedRepo = `${dw.metadata.namespace}/${dw.metadata.name}`;
+    if (allRepos.includes(expectedRepo)) {
       count++;
     }
   }
@@ -1028,63 +981,28 @@ function countBackedUpWorkspaces(devWorkspaces, registryConfig) {
   return count;
 }
 
-function getQuayToken(registry, username, password, repo) {
-  const url = `https://${registry}/v2/auth?service=${registry}&scope=repository:${username}/${repo}:pull`;
+function listAllRepositories(registry, username, password) {
+  // Use Quay API to list all repositories for the user
+  const url = `https://${registry}/api/v1/repository?namespace=${username}`;
 
   const res = http.get(url, {
-    auth: 'basic',
     headers: {
       Authorization: `Basic ${encoding.b64encode(`${username}:${password}`)}`
     }
   });
 
   if (res.status !== 200) {
-    console.error(`Failed to get token: ${res.status}`);
+    console.error(`Failed to list repositories: ${res.status}`);
     return null;
   }
 
-  return JSON.parse(res.body).token;
-}
-
-function checkArtifactExists(registry, username, repo, token, expectedArtifactType) {
-  const url = `https://${registry}/v2/${username}/${repo}/manifests/latest`;
-
-  const res = http.get(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.oci.image.manifest.v1+json'
-    }
-  });
-
-  if (res.status === 200) {
-    const body = JSON.parse(res.body);
-
-    if (body.artifactType === expectedArtifactType) {
-      return true;
-    }
-
-    console.warn(`Unexpected artifactType: ${body.artifactType}`);
-    return false;
-  }
-
-  // Handle "does not exist"
   try {
     const body = JSON.parse(res.body);
-    if (body.errors) {
-      const codes = body.errors.map(e => e.code);
-
-      if (
-          codes.includes("UNAUTHORIZED") ||
-          codes.includes("NAME_UNKNOWN") ||
-          codes.includes("MANIFEST_UNKNOWN")
-      ) {
-        return false;
-      }
-    }
+    // Extract repository names in format: namespace/name
+    return body.repositories.map(repo => `${repo.namespace}/${repo.name}`);
   } catch (e) {
-    console.warn("Non-JSON response from registry");
+    console.error(`Failed to parse repository list: ${e.message}`);
+    return null;
   }
-
-  console.warn(`Unexpected response: ${res.status}`);
-  return false;
 }
+
