@@ -20,7 +20,7 @@ import {
 
 export const devWorkspacesReady = new Gauge('devworkspaces_ready');
 export const execAttempted = new Counter('exec_attempted');
-export const execSkipped = new Counter('exec_skipped_due_to_pod_not_ready');
+export const execSkipped = new Counter('exec_skipped_due_to_errors');
 export const execAllowed = new Counter('exec_allowed_total');
 export const execDenied = new Counter('exec_denied_total');
 export const execUnexpectedAllowed = new Counter('exec_unexpected_allowed_total');
@@ -82,7 +82,7 @@ export const options = {
         'webhook_pod_restarts_total': ['value == 0'],
 
         // All workspaces must be ready - no skipped exec attempts allowed
-        'exec_skipped_due_to_pod_not_ready': ['count == 0'],
+        'exec_skipped_due_to_errors': ['count == 0'],
 
         // Webhook timeout thresholds - fail if webhooks timeout (indicates saturation)
         'mutation_webhook_timeout_500': ['count == 0'],
@@ -175,7 +175,7 @@ export function handleSummary(data) {
         'devworkspaces_ready',
         // Execution metrics
         'exec_attempted',
-        'exec_skipped_due_to_pod_not_ready',
+        'exec_skipped_due_to_errors',
         'exec_allowed_total',
         'exec_denied_total',
         'exec_unexpected_allowed_total',
