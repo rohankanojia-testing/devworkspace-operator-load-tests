@@ -163,27 +163,6 @@ export function runBackupLoadTest(data) {
 
 // Parse cron schedule to extract interval in minutes
 // Supports simple patterns like "*/N * * * *" (every N minutes)
-function parseCronScheduleInterval(cronSchedule) {
-  if (!cronSchedule || cronSchedule === "") {
-    return 0; // No schedule provided
-  }
-
-  // Parse patterns like "*/10 * * * *" (every 10 minutes)
-  const everyNMinutesPattern = /^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*/;
-  const match = cronSchedule.match(everyNMinutesPattern);
-
-  if (match) {
-    const intervalMinutes = parseInt(match[1], 10);
-    console.log(`Parsed backup schedule "${cronSchedule}" -> interval: ${intervalMinutes} minutes`);
-    return intervalMinutes;
-  }
-
-  // Could add more patterns here (e.g., "0 */2 * * *" for every 2 hours)
-  // For now, return 0 for unparseable schedules
-  console.warn(`Could not parse backup schedule "${cronSchedule}" - using full monitoring duration`);
-  return 0;
-}
-
 function stopWorkspacesAndMonitorBackups(data) {
   // Step 1: Get all DevWorkspaces
   console.log("Step 1: Discovering existing DevWorkspaces...");
@@ -418,13 +397,19 @@ function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryCon
 
   while (Date.now() < endTime) {
     // ----------------------------------------
-    // Get job metrics (current snapshot)
+    // 1. Get job metrics (ONLY ONCE)
     // ----------------------------------------
     const metrics = getBackupJobMetrics();
-    const { cumulativeTotal, cumulativeSucceeded, cumulativeFailed, cumulativePodCount, running } = metrics;
+    const {
+      cumulativeTotal,
+      cumulativeSucceeded,
+      cumulativeFailed,
+      cumulativePodCount,
+      running
+    } = metrics;
 
     // ----------------------------------------
-    // Update metrics (use Map/Set sizes directly)
+    // 2. Update metrics
     // ----------------------------------------
     backupJobsTotal.add(cumulativeTotal);
     backupJobsSucceeded.add(cumulativeSucceeded);
@@ -432,36 +417,36 @@ function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryCon
     backupJobsRunning.add(running);
     backupPodsTotal.add(cumulativePodCount);
 
-    // Calculate and record success rate
     if (cumulativeTotal > 0) {
       backupSuccessRate.add(cumulativeSucceeded / cumulativeTotal);
     }
 
     // ----------------------------------------
-    // Registry check (source of truth)
+    // 3. Registry check (BATCH, NOT per-DW)
     // ----------------------------------------
-    // List all repositories once instead of checking each individually
-    const allRepos = listAllRepositories(
-        registryConfig.registry,
-        registryConfig.username,
-        registryConfig.password
-    );
-
     let backedUpCount = 0;
-    if (allRepos) {
-      for (const dw of devWorkspaces) {
-        // Construct expected repo path: namespace/devworkspace-name
-        const expectedRepo = `${dw.metadata.namespace}/${dw.metadata.name}`;
 
-        // Check if this repo exists in the list
-        if (allRepos.includes(expectedRepo)) {
+    if (!registryConfig.username || !registryConfig.password) {
+      // fallback to job success
+      backedUpCount = cumulativeSucceeded;
+    } else {
+      const repoSet = getAllReposAsSet(
+          registryConfig.registry,
+          registryConfig.username,
+          registryConfig.password
+      );
+
+      for (const dw of devWorkspaces) {
+        const repoPath = `${dw.metadata.namespace}/${dw.metadata.name}`;
+
+        if (repoSet.has(repoPath)) {
           backedUpCount++;
         }
       }
     }
 
     // ----------------------------------------
-    // Logging
+    // 4. Logging
     // ----------------------------------------
     console.log(
         `Jobs observed=${cumulativeTotal}, ` +
@@ -471,15 +456,23 @@ function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryCon
     );
 
     // ----------------------------------------
-    // ✅ TERMINATION: registry is source of truth
+    // 5. ✅ TERMINATION (robust)
     // ----------------------------------------
-    if (backedUpCount === devWorkspaces.length && devWorkspaces.length > 0) {
-      console.log("✅ All workspaces backed up (verified via registry)");
-      break;
+    if (devWorkspaces.length > 0) {
+      if (backedUpCount === devWorkspaces.length) {
+        console.log("✅ All workspaces backed up (verified via registry)");
+        break;
+      }
+
+      // also break if everything finished but some failed
+      if (cumulativeSucceeded + cumulativeFailed === devWorkspaces.length) {
+        console.warn("⚠️ All jobs completed but some backups missing in registry");
+        break;
+      }
     }
 
     // ----------------------------------------
-    // System checks
+    // 6. System checks
     // ----------------------------------------
     checkOperatorMetrics();
     checkSystemEtcdMetrics();
@@ -960,30 +953,10 @@ export function handleSummary(data) {
 
   return backupLoadTestSummaryReport;
 }
-
-function countBackedUpWorkspaces(devWorkspaces, registryConfig) {
-  const allRepos = listAllRepositories(
-      registryConfig.registry,
-      registryConfig.username,
-      registryConfig.password
-  );
-
-  if (!allRepos) return 0;
-
-  let count = 0;
-  for (const dw of devWorkspaces) {
-    const expectedRepo = `${dw.metadata.namespace}/${dw.metadata.name}`;
-    if (allRepos.includes(expectedRepo)) {
-      count++;
-    }
-  }
-
-  return count;
-}
-
-function listAllRepositories(registry, username, password) {
-  // Use Quay API to list all repositories for the user
-  const url = `https://${registry}/api/v1/repository?namespace=${username}`;
+function checkRepositoryExists(registry, username, password, repoPath) {
+  // Use Docker Registry HTTP API v2 to check if repository exists
+  // Try to list tags - if it succeeds, the repo exists
+  const url = `https://${registry}/v2/${username}/${repoPath}/tags/list`;
 
   const res = http.get(url, {
     headers: {
@@ -991,18 +964,45 @@ function listAllRepositories(registry, username, password) {
     }
   });
 
-  if (res.status !== 200) {
-    console.error(`Failed to list repositories: ${res.status}`);
-    return null;
-  }
-
-  try {
-    const body = JSON.parse(res.body);
-    // Extract repository names in format: namespace/name
-    return body.repositories.map(repo => `${repo.namespace}/${repo.name}`);
-  } catch (e) {
-    console.error(`Failed to parse repository list: ${e.message}`);
-    return null;
-  }
+  // 200 = repo exists with tags
+  // 404 = repo doesn't exist
+  // Other errors = treat as not backed up yet
+  return res.status === 200;
 }
 
+function getAllReposAsSet(registry, username, password) {
+  const repos = [];
+  let page = 1;
+  const pageSize = 100;
+
+  while (true) {
+    const url = `https://${registry}/api/v1/repository?namespace=${username}&page=${page}&limit=${pageSize}`;
+
+    const res = http.get(url, {
+      headers: {
+        // ✅ Prefer Bearer token if password is actually a token
+        Authorization: `Bearer ${password}`
+      }
+    });
+
+    if (res.status !== 200) {
+      console.warn(`Failed to fetch repos (page ${page}): ${res.status}`);
+      break;
+    }
+
+    const data = JSON.parse(res.body);
+    const batch = data.repositories || [];
+
+    if (batch.length === 0) break;
+
+    for (const repo of batch) {
+      // ✅ Correct path for matching
+      repos.push(`${username}/${repo.name}`);
+    }
+
+    if (batch.length < pageSize) break;
+    page++;
+  }
+
+  return new Set(repos);
+}
