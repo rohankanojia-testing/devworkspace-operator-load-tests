@@ -49,7 +49,7 @@ CSV_FILE="webhook_load_test_results.csv"
 
 # Create CSV header if file doesn't exist
 if [[ ! -f "$CSV_FILE" ]]; then
-    echo "Users,Iterations,DWs Ready,Avg Webhook CPU (mCPU),Avg Webhook Mem (MB),Create Latency (ms),Exec Attempted,Exec Allowed,Exec Denied,Exec Skipped,Exec Latency (ms),Mutating Latency (ms),Validating Latency (ms),Mutation Timeouts,Validation Timeouts,Invalid Mutating Deny,Webhook Restarts" > "$CSV_FILE"
+    echo "Users,Iterations,DWs Ready,Create Latency (ms),Exec Attempted,Exec Allowed,Exec Failed,Exec Denied,Exec Skipped,Exec Latency (ms),Mutating Latency (ms),Validating Latency (ms),Mutation Timeouts,Validation Timeouts,Immutable Labels Enforced (%),Webhook Restarts,Avg Webhook CPU (mCPU),Avg Webhook Mem (MB)" > "$CSV_FILE"
     echo "Created new CSV file: $CSV_FILE"
 else
     echo "Appending to existing CSV file: $CSV_FILE"
@@ -137,14 +137,13 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
 
     # Extract all metrics (with defaults if not found)
     DW_READY=$(extract_counter_minmax "$INPUT" "devworkspaces_ready" || echo "0")
-    AVG_WEBHOOK_CPU=$(extract_avg "$INPUT" "average_webhook_cpu_millicores" || echo "0")
-    AVG_WEBHOOK_MEM=$(extract_avg "$INPUT" "average_webhook_memory_mb" || echo "0")
     CREATE_LATENCY=$(extract_avg "$INPUT" "create_latency_ms" || echo "0")
 
     EXEC_ATTEMPTED=$(extract_counter "$INPUT" "exec_attempted" || echo "0")
     EXEC_ALLOWED=$(extract_counter "$INPUT" "exec_allowed_total" || echo "0")
+    EXEC_FAILED=$(extract_counter "$INPUT" "exec_failed_total" || echo "0")
     EXEC_DENIED=$(extract_counter "$INPUT" "exec_denied_total" || echo "0")
-    EXEC_SKIPPED=$(extract_counter "$INPUT" "exec_skipped_due_to_pod_not_ready" || echo "0")
+    EXEC_SKIPPED=$(extract_counter "$INPUT" "exec_skipped_pod_not_ready" || echo "0")
     EXEC_LATENCY=$(extract_avg "$INPUT" "exec_latency_ms" || echo "0")
 
     MUTATING_LATENCY=$(extract_avg "$INPUT" "mutating_latency_ms" || echo "0")
@@ -152,17 +151,19 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
 
     MUTATION_TIMEOUTS=$(extract_counter "$INPUT" "mutation_webhook_timeout_500" || echo "0")
     VALIDATION_TIMEOUTS=$(extract_counter "$INPUT" "validation_webhook_timeout_500" || echo "0")
-    INVALID_MUTATING_DENY=$(extract_counter "$INPUT" "invalid_mutating_deny_total" || echo "0")
+    IMMUTABLE_LABELS_ENFORCED=$(extract_avg "$INPUT" "immutable_labels_enforced_rate" || echo "0")
 
     WEBHOOK_RESTARTS=$(extract_counter_minmax "$INPUT" "webhook_pod_restarts_total" || echo "0")
 
+    AVG_WEBHOOK_CPU=$(extract_avg "$INPUT" "average_webhook_cpu_millicores" || echo "0")
+    AVG_WEBHOOK_MEM=$(extract_avg "$INPUT" "average_webhook_memory_mb" || echo "0")
+
     # Set defaults if empty
     DW_READY=${DW_READY:-0}
-    AVG_WEBHOOK_CPU=${AVG_WEBHOOK_CPU:-0}
-    AVG_WEBHOOK_MEM=${AVG_WEBHOOK_MEM:-0}
     CREATE_LATENCY=${CREATE_LATENCY:-0}
     EXEC_ATTEMPTED=${EXEC_ATTEMPTED:-0}
     EXEC_ALLOWED=${EXEC_ALLOWED:-0}
+    EXEC_FAILED=${EXEC_FAILED:-0}
     EXEC_DENIED=${EXEC_DENIED:-0}
     EXEC_SKIPPED=${EXEC_SKIPPED:-0}
     EXEC_LATENCY=${EXEC_LATENCY:-0}
@@ -170,8 +171,10 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     VALIDATING_LATENCY=${VALIDATING_LATENCY:-0}
     MUTATION_TIMEOUTS=${MUTATION_TIMEOUTS:-0}
     VALIDATION_TIMEOUTS=${VALIDATION_TIMEOUTS:-0}
-    INVALID_MUTATING_DENY=${INVALID_MUTATING_DENY:-0}
+    IMMUTABLE_LABELS_ENFORCED=${IMMUTABLE_LABELS_ENFORCED:-0}
     WEBHOOK_RESTARTS=${WEBHOOK_RESTARTS:-0}
+    AVG_WEBHOOK_CPU=${AVG_WEBHOOK_CPU:-0}
+    AVG_WEBHOOK_MEM=${AVG_WEBHOOK_MEM:-0}
 
     # Check if any metrics were found
     if [[ "$DW_READY" == "0" && "$AVG_WEBHOOK_CPU" == "0" && "$EXEC_ATTEMPTED" == "0" ]]; then
@@ -179,7 +182,7 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     fi
 
     # Build CSV row
-    CSV_ROW="$USERS,$ITERATIONS,$DW_READY,$AVG_WEBHOOK_CPU,$AVG_WEBHOOK_MEM,$CREATE_LATENCY,$EXEC_ATTEMPTED,$EXEC_ALLOWED,$EXEC_DENIED,$EXEC_SKIPPED,$EXEC_LATENCY,$MUTATING_LATENCY,$VALIDATING_LATENCY,$MUTATION_TIMEOUTS,$VALIDATION_TIMEOUTS,$INVALID_MUTATING_DENY,$WEBHOOK_RESTARTS"
+    CSV_ROW="$USERS,$ITERATIONS,$DW_READY,$CREATE_LATENCY,$EXEC_ATTEMPTED,$EXEC_ALLOWED,$EXEC_FAILED,$EXEC_DENIED,$EXEC_SKIPPED,$EXEC_LATENCY,$MUTATING_LATENCY,$VALIDATING_LATENCY,$MUTATION_TIMEOUTS,$VALIDATION_TIMEOUTS,$IMMUTABLE_LABELS_ENFORCED,$WEBHOOK_RESTARTS,$AVG_WEBHOOK_CPU,$AVG_WEBHOOK_MEM"
 
     # Append to CSV
     echo "$CSV_ROW" >> "$CSV_FILE"
