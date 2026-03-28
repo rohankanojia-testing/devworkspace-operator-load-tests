@@ -532,6 +532,20 @@ run_k6_binary_test() {
     CURRENT_BACKUP_SCHEDULE=""
   fi
 
+  # Derive REGISTRY_URL from DWOC config if not set
+  if [[ -z "${REGISTRY_URL:-}" ]]; then
+    REGISTRY_PATH=$(kubectl get devworkspaceoperatorconfig devworkspace-operator-config -n "${DWO_NAMESPACE}" \
+      -o jsonpath='{.config.workspace.backupCronJob.repositoryUrl}' 2>/dev/null || echo "")
+
+    if [[ -n "$REGISTRY_PATH" ]]; then
+      # Extract just the registry host (e.g., "quay.io" from "quay.io/username/repo")
+      REGISTRY_URL=$(echo "$REGISTRY_PATH" | cut -d'/' -f1)
+      log_info "Derived REGISTRY_URL from DWOC config: $REGISTRY_URL"
+    else
+      log_warning "REGISTRY_URL not set and could not derive from DWOC config"
+    fi
+  fi
+
   if IN_CLUSTER='false' \
     KUBE_TOKEN="${KUBE_TOKEN}" \
     KUBE_API="${KUBE_API}" \
@@ -545,6 +559,9 @@ run_k6_binary_test() {
     MAX_RESTORE_SAMPLES="${MAX_RESTORE_SAMPLES}" \
     INITIAL_ETCD_RESTARTS="${INITIAL_ETCD_RESTARTS}" \
     INITIAL_OPERATOR_RESTARTS="${INITIAL_OPERATOR_RESTARTS}" \
+    REGISTRY_URL="${REGISTRY_URL}" \
+    REGISTRY_USERNAME="${REGISTRY_USERNAME}" \
+    REGISTRY_PASSWORD="${REGISTRY_PASSWORD}" \
     k6 run "${K6_SCRIPT}"; then
     log_success "k6 backup load test completed successfully"
     return 0

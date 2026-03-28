@@ -16,6 +16,7 @@
 import http from 'k6/http';
 import {sleep} from 'k6';
 import {Trend, Counter, Gauge} from 'k6/metrics';
+import encoding from 'k6/encoding';
 import {htmlReport} from "https://raw.githubusercontent.com/benc-uk/k6-reporter/main/dist/bundle.js";
 import {textSummary} from "https://jslib.k6.io/k6-summary/0.0.1/index.js";
 import {
@@ -43,7 +44,7 @@ let ETCD_NAMESPACE = 'openshift-etcd';
 let ETCD_POD_NAME_PATTERN = 'etcd';
 const ETCD_POD_SELECTOR = `app=${ETCD_POD_NAME_PATTERN}`;
 const OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=devworkspace-controller';
-const monitorPollInterval = 10; // seconds between monitoring polls
+const monitorPollInterval = 2; // seconds between monitoring polls
 
 // Parse initial restart counts from environment variables
 const initialEtcdRestarts = __ENV.INITIAL_ETCD_RESTARTS ? JSON.parse(__ENV.INITIAL_ETCD_RESTARTS) : {};
@@ -117,6 +118,12 @@ const restoreSuccessRate = new Gauge('restore_success_rate');
 
 const maxCpuMillicores = 250;
 const maxMemoryBytes = 200 * 1024 * 1024;
+const registryConfig = {
+  registry: __ENV.REGISTRY_URL || 'quay.io',
+  username: __ENV.REGISTRY_USERNAME,
+  password: __ENV.REGISTRY_PASSWORD,
+  expectedArtifactType: __ENV.EXPECTED_ARTIFACT_TYPE || 'application/vnd.devworkspace.backup.v1+json'
+};
 
 export function setup() {
   const clusterInfo = detectClusterType(apiServer, headers);
@@ -212,7 +219,7 @@ function stopWorkspacesAndMonitorBackups(data) {
 
   // Step 4: Monitor backup jobs and operator/etcd metrics
   console.log("\nStep 4: Monitoring backup Jobs and system metrics...");
-  monitorBackupJobsAndMetrics(backupMonitorDurationMinutes);
+  monitorBackupJobsAndMetrics(backupMonitorDurationMinutes, devWorkspaces, registryConfig);
 
   // Step 5: Verify all workspaces were backed up
   console.log("\nStep 5: Verifying backup coverage...");
@@ -404,110 +411,92 @@ function getBackupJobMetrics() {
   };
 }
 
-function monitorBackupJobsAndMetrics(durationMinutes) {
+function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryConfig) {
   const endTime = Date.now() + (durationMinutes * 60 * 1000);
-  let iteration = 0;
-  let lastLoggedStatus = "";
-  let previousCumulativeTotal = 0;
-  let previousCumulativePods = 0;
 
-  // Parse backup schedule to determine expected interval
-  const scheduleIntervalMinutes = parseCronScheduleInterval(backupSchedule);
-  const noJobTimeoutMinutes = scheduleIntervalMinutes > 0 ? scheduleIntervalMinutes + 5 : 0; // Wait interval + 5 min buffer
-  let lastNewJobTime = Date.now(); // Track when we last saw a new job
-  let noJobTimeoutReported = false;
+  // cache tokens per repo (avoid re-auth every loop)
+  const tokenCache = new Map();
 
-  if (scheduleIntervalMinutes > 0) {
-    console.log(`Backup schedule interval: ${scheduleIntervalMinutes} minutes`);
-    console.log(`Will exit early if no new jobs created for ${noJobTimeoutMinutes} minutes (interval + 5 min buffer)\n`);
-  } else {
-    console.log("No backup schedule detected - will monitor for full duration\n");
-  }
+  console.log("\nMonitoring backup jobs (registry-driven termination)...\n");
 
   while (Date.now() < endTime) {
-    iteration++;
+    // ----------------------------------------
+    // Get job metrics (current snapshot)
+    // ----------------------------------------
     const metrics = getBackupJobMetrics();
+    const { cumulativeTotal, cumulativePodCount, running, jobs } = metrics;
 
-    // Track new jobs discovered (cumulative total increased)
-    if (metrics.cumulativeTotal > previousCumulativeTotal) {
-      backupJobsTotal.add(metrics.cumulativeTotal - previousCumulativeTotal);
-      previousCumulativeTotal = metrics.cumulativeTotal;
-      lastNewJobTime = Date.now(); // Update last seen time
-    }
+    // ----------------------------------------
+    // Update metrics (no deltas)
+    // ----------------------------------------
+    backupJobsTotal.add(cumulativeTotal);
+    backupPodsTotal.add(cumulativePodCount);
+    backupJobsRunning.add(running);
 
-    // Track new pods created (use cumulative pod count)
-    if (metrics.cumulativePodCount > previousCumulativePods) {
-      backupPodsTotal.add(metrics.cumulativePodCount - previousCumulativePods);
-      previousCumulativePods = metrics.cumulativePodCount;
-    }
+    // ----------------------------------------
+    // Registry check (source of truth)
+    // ----------------------------------------
+    let backedUpCount = 0;
 
-    // Update gauges
-    backupJobsRunning.add(metrics.running);
+    for (const dw of devWorkspaces) {
+      const repo = dw.metadata.name;
 
-    // Calculate success rate based on cumulative totals
-    if (metrics.cumulativeTotal > 0) {
-      const successRate = metrics.cumulativeSucceeded / metrics.cumulativeTotal;
-      backupSuccessRate.add(successRate);
-    }
-
-    // Log progress every 10 iterations (100 seconds) or when status changes
-    // Use cumulative counts for succeeded/failed to show accurate totals
-    const currentStatus = `${metrics.cumulativeSucceeded}/${metrics.cumulativeFailed}/${metrics.running}`;
-    if (iteration % 10 === 0 || currentStatus !== lastLoggedStatus) {
-      const remainingMinutes = Math.ceil((endTime - Date.now()) / 60000);
-      console.log(`  [${iteration}] Jobs (cumulative) - Succeeded: ${metrics.cumulativeSucceeded}, Failed: ${metrics.cumulativeFailed}, Running: ${metrics.running}, Pods: ${metrics.cumulativePodCount} (${remainingMinutes}m remaining)`);
-      lastLoggedStatus = currentStatus;
-    }
-
-    // Check operator and etcd metrics
-    checkOperatorMetrics();
-    checkSystemEtcdMetrics();
-
-    // Check if all jobs are complete (use cumulative totals)
-    if (metrics.cumulativeTotal > 0 && (metrics.cumulativeSucceeded + metrics.cumulativeFailed) >= metrics.cumulativeTotal && metrics.running === 0) {
-      console.log("All backup Jobs have completed or permanently failed");
-
-      // Record final cumulative counts
-      backupJobsSucceeded.add(metrics.cumulativeSucceeded);
-      backupJobsFailed.add(metrics.cumulativeFailed);
-
-      break;
-    }
-
-    // Check if we should exit early due to no new jobs being created
-    if (noJobTimeoutMinutes > 0 && !noJobTimeoutReported) {
-      const timeSinceLastNewJob = (Date.now() - lastNewJobTime) / 1000 / 60; // minutes
-
-      if (timeSinceLastNewJob >= noJobTimeoutMinutes) {
-        const totalJobs = metrics.cumulativeTotal;
-        console.log("");
-        console.log("⚠️  ============================================");
-        console.log(`⚠️  No new backup jobs created for ${timeSinceLastNewJob.toFixed(1)} minutes`);
-        console.log(`⚠️  Expected interval: ${scheduleIntervalMinutes} minutes`);
-        console.log(`⚠️  Timeout threshold: ${noJobTimeoutMinutes} minutes`);
-        console.log(`⚠️  Total jobs created: ${totalJobs}`);
-        console.log("⚠️  ============================================");
-        console.log("");
-
-        if (totalJobs === 0) {
-          console.log("❌ No backup jobs were ever created - backup schedule may be misconfigured");
-        } else {
-          console.log(`✅ ${totalJobs} backup jobs were created before stopping`);
+      let token = tokenCache.get(repo);
+      if (!token) {
+        token = getQuayToken(
+            registryConfig.registry,
+            registryConfig.username,
+            registryConfig.password,
+            repo
+        );
+        if (token) {
+          tokenCache.set(repo, token);
         }
+      }
 
-        console.log("Stopping monitoring early - backup job creation appears to have stopped");
+      if (!token) continue;
 
-        // Record final cumulative counts before exiting
-        backupJobsSucceeded.add(metrics.cumulativeSucceeded);
-        backupJobsFailed.add(metrics.cumulativeFailed);
+      const exists = checkArtifactExists(
+          registryConfig.registry,
+          registryConfig.username,
+          repo,
+          token,
+          registryConfig.expectedArtifactType
+      );
 
-        noJobTimeoutReported = true;
-        break;
+      if (exists) {
+        backedUpCount++;
       }
     }
 
+    // ----------------------------------------
+    // Logging
+    // ----------------------------------------
+    console.log(
+        `Jobs observed=${cumulativeTotal}, ` +
+        `pods observed=${cumulativePodCount}, ` +
+        `running=${running}, ` +
+        `backedUp=${backedUpCount}/${devWorkspaces.length}`
+    );
+
+    // ----------------------------------------
+    // ✅ TERMINATION: registry is source of truth
+    // ----------------------------------------
+    if (backedUpCount === devWorkspaces.length && devWorkspaces.length > 0) {
+      console.log("✅ All workspaces backed up (verified via registry)");
+      break;
+    }
+
+    // ----------------------------------------
+    // System checks
+    // ----------------------------------------
+    checkOperatorMetrics();
+    checkSystemEtcdMetrics();
+
     sleep(monitorPollInterval);
   }
+
+  console.log("\n📊 Monitoring finished");
 }
 
 function getImageStreams(namespace) {
@@ -979,4 +968,114 @@ export function handleSummary(data) {
   }
 
   return backupLoadTestSummaryReport;
+}
+
+// Cache tokens per repo (shared across iterations)
+const registryTokenCache = new Map();
+
+function getRegistryToken(registryConfig, repo) {
+  if (registryTokenCache.has(repo)) {
+    return registryTokenCache.get(repo);
+  }
+
+  const token = getQuayToken(
+      registryConfig.registry,
+      registryConfig.username,
+      registryConfig.password,
+      repo
+  );
+
+  if (token) {
+    registryTokenCache.set(repo, token);
+  }
+
+  return token;
+}
+
+function isWorkspaceBackedUp(dw, registryConfig) {
+  const repo = dw.metadata.name;
+  const token = getRegistryToken(registryConfig, repo);
+
+  if (!token) return false;
+
+  return checkArtifactExists(
+      registryConfig.registry,
+      registryConfig.username,
+      repo,
+      token,
+      registryConfig.expectedArtifactType
+  );
+}
+
+function countBackedUpWorkspaces(devWorkspaces, registryConfig) {
+  let count = 0;
+
+  for (const dw of devWorkspaces) {
+    if (isWorkspaceBackedUp(dw, registryConfig)) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+function getQuayToken(registry, username, password, repo) {
+  const url = `https://${registry}/v2/auth?service=${registry}&scope=repository:${username}/${repo}:pull`;
+
+  const res = http.get(url, {
+    auth: 'basic',
+    headers: {
+      Authorization: `Basic ${encoding.b64encode(`${username}:${password}`)}`
+    }
+  });
+
+  if (res.status !== 200) {
+    console.error(`Failed to get token: ${res.status}`);
+    return null;
+  }
+
+  return JSON.parse(res.body).token;
+}
+
+function checkArtifactExists(registry, username, repo, token, expectedArtifactType) {
+  const url = `https://${registry}/v2/${username}/${repo}/manifests/latest`;
+
+  const res = http.get(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.oci.image.manifest.v1+json'
+    }
+  });
+
+  if (res.status === 200) {
+    const body = JSON.parse(res.body);
+
+    if (body.artifactType === expectedArtifactType) {
+      return true;
+    }
+
+    console.warn(`Unexpected artifactType: ${body.artifactType}`);
+    return false;
+  }
+
+  // Handle "does not exist"
+  try {
+    const body = JSON.parse(res.body);
+    if (body.errors) {
+      const codes = body.errors.map(e => e.code);
+
+      if (
+          codes.includes("UNAUTHORIZED") ||
+          codes.includes("NAME_UNKNOWN") ||
+          codes.includes("MANIFEST_UNKNOWN")
+      ) {
+        return false;
+      }
+    }
+  } catch (e) {
+    console.warn("Non-JSON response from registry");
+  }
+
+  console.warn(`Unexpected response: ${res.status}`);
+  return false;
 }

@@ -12,7 +12,7 @@ DEFAULT_OPERATOR_NAMESPACE="openshift-operators"
 DEFAULT_REGISTRY_SERVER="quay.io"
 
 # Create or update registry secret for backup testing
-# Uses environment variables: QUAY_USERNAME, QUAY_PASSWORD
+# Uses environment variables: REGISTRY_USERNAME, REGISTRY_PASSWORD
 setup_backup_registry_secret() {
   local secret_name="${1:-$DEFAULT_SECRET_NAME}"
   local namespace="${2:-$DEFAULT_OPERATOR_NAMESPACE}"
@@ -46,13 +46,13 @@ setup_backup_registry_secret() {
   fi
 
   # Secret doesn't exist - check for environment variables
-  if [[ -z "${QUAY_USERNAME:-}" ]] || [[ -z "${QUAY_PASSWORD:-}" ]]; then
-    log_error "Secret '${secret_name}' does not exist and QUAY_USERNAME/QUAY_PASSWORD environment variables are not set"
+  if [[ -z "${REGISTRY_USERNAME:-}" ]] || [[ -z "${REGISTRY_PASSWORD:-}" ]]; then
+    log_error "Secret '${secret_name}' does not exist and REGISTRY_USERNAME/REGISTRY_PASSWORD environment variables are not set"
     log_info ""
     log_info "To create the secret, either:"
     log_info "  1. Set environment variables:"
-    log_info "     export QUAY_USERNAME=your-username"
-    log_info "     export QUAY_PASSWORD=your-password"
+    log_info "     export REGISTRY_USERNAME=your-username"
+    log_info "     export REGISTRY_PASSWORD=your-password"
     log_info ""
     log_info "  2. Or create the secret manually:"
     log_info "     kubectl create secret docker-registry ${secret_name} \\"
@@ -72,8 +72,8 @@ setup_backup_registry_secret() {
 
   if ! kubectl create secret docker-registry "$secret_name" \
     --docker-server="$registry_server" \
-    --docker-username="$QUAY_USERNAME" \
-    --docker-password="$QUAY_PASSWORD" \
+    --docker-username="$REGISTRY_USERNAME" \
+    --docker-password="$REGISTRY_PASSWORD" \
     -n "$namespace"; then
     log_error "Failed to create secret"
     return 1
@@ -153,18 +153,18 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "Usage: $0 <setup|validate|delete> [secret-name] [namespace] [registry-server]"
     echo ""
     echo "Commands:"
-    echo "  setup    - Create or update registry secret (reads QUAY_USERNAME and QUAY_PASSWORD from env)"
+    echo "  setup    - Create or update registry secret (reads REGISTRY_USERNAME and REGISTRY_PASSWORD from env)"
     echo "  validate - Validate that secret exists and is properly configured"
     echo "  delete   - Delete the registry secret"
     echo ""
     echo "Environment Variables (for 'setup' command):"
-    echo "  QUAY_USERNAME - Registry username (required if secret doesn't exist)"
-    echo "  QUAY_PASSWORD - Registry password (required if secret doesn't exist)"
+    echo "  REGISTRY_USERNAME - Registry username (required if secret doesn't exist)"
+    echo "  REGISTRY_PASSWORD - Registry password (required if secret doesn't exist)"
     echo ""
     echo "Examples:"
     echo "  # Setup with default values (quay-push-secret in openshift-operators)"
-    echo "  export QUAY_USERNAME=myuser"
-    echo "  export QUAY_PASSWORD=mypass"
+    echo "  export REGISTRY_USERNAME=myuser"
+    echo "  export REGISTRY_PASSWORD=mypass"
     echo "  $0 setup"
     echo ""
     echo "  # Setup with custom values"

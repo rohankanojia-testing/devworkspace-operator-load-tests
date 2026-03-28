@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"kubectl logs -n openshift-operators deployment/devworkspace-controller-manager --tail=50 2>&1 | grep -iE '\\(error|failed|throttl|rate limit|created\\)' | tail -20\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"cd /home/devworkspace-operator-load-tests && tail -100 /tmp/k6-output.log 2>/dev/null | tail -30\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"ps aux | grep k6 | grep -v grep\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"kubectl get ns | grep -c load-test-ns\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"kubectl get dw -n loadtest-devworkspaces 2>/dev/null | wc -l || echo 0\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"cd /home/devworkspace-operator-load-tests && grep -E '\\(iterations|vus|maxDevWorkspaces\\)' test-devworkspace-controller-load/devworkspace_load_test.js | head -20\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"cd /home/devworkspace-operator-load-tests && cat test-devworkspace-controller-load/runk6.sh | grep -A 5 'K6_VUS='\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"lsof -p 3273746 2>/dev/null | grep -E '\\(log|output\\)' || echo 'No log files open'\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"kubectl get jobs --all-namespaces -l devworkspace.devfile.io/backup-job=true --no-headers 2>/dev/null | wc -l\")",
+      "Bash(ssh root@aa37-h01-000-r740xd.rdu3.labs.perfscale.redhat.com \"tail -100 /home/devworkspace-operator-load-tests/outputs/backup_run_20260327_083758/logs/backup_2500_correct_config.log | grep -E 'devworkspace|VUs|iterations|summary|stopped|created'\")"
+    ]
+  }
+}

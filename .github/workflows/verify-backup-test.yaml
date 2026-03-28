@@ -74,8 +74,8 @@ jobs:
         run: |
           export KUBECONFIG=$HOME/.kube/config
           # Set dummy credentials for ttl.sh (anonymous registry, credentials not validated)
-          export QUAY_USERNAME=anonymous
-          export QUAY_PASSWORD=anonymous
+          export REGISTRY_USERNAME=anonymous
+          export REGISTRY_PASSWORD=anonymous
           # Use ttl.sh ephemeral registry (no authentication required)
           kubectl create namespace $LOAD_TEST_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           RANDOM_ID="backup-test-${{ github.run_id }}-$(date +%s)"

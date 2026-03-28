@@ -1,0 +1,21 @@
+     ✓ DevWorkspace created
+     ✓ Fetched pod metrics successfully
+     ✗ [devworkspace-controller-manager-575b9674d5-4c887] CPU < 250m
+      ↳  96% — ✓ 15080 / ✗ 602
+     ✗ [devworkspace-controller-manager-575b9674d5-4c887] Memory < 200Mi
+      ↳  34% — ✓ 5357 / ✗ 10325
+
+     average_operator_cpu...........: avg=195.163946   min=1         med=198        max=281        p(90)=236       p(95)=238
+     average_operator_memory........: avg=209.997413   min=62.460938 med=215.757813 max=272.332031 p(90)=254.84375 p(95)=255.207031
+     devworkspace_create_count......: 1001  0.416666/s
+   ✓ devworkspace_create_duration...: avg=5.637363     min=4         med=5          max=71         p(90)=6         p(95)=7
+   ✓ devworkspace_delete_duration...: avg=0            min=0         med=0          max=0          p(90)=0         p(95)=0
+     devworkspace_ready.............: 1001  0.416666/s
+   ✗ devworkspace_ready_duration....: avg=78425.022977 min=10008     med=80063      max=275403     p(90)=135112    p(95)=145213
+   ✓ devworkspace_ready_failed......: 0     0/s
+   ✗ operator_cpu_violations........: 602   0.250582/s
+
+running (40m02.4s), 000/200 VUs, 89249 complete and 0 interrupted iterations
+create_and_delete_devworksp... ✓ [======================================] 000/200 VUs  40m0s
+final_cleanup                  ✓ [======================================] 1 VUs        00m02.4s/10m0s  1/1 iters, 1 per VU
+ERRO[2402] thresholds on metrics 'checks, devworkspace_ready_duration, operator_cpu_violations, operator_mem_violations' have been crossed
