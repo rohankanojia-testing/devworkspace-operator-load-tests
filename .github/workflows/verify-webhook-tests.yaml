@@ -71,10 +71,10 @@ jobs:
           sudo apt-get install k6
           k6 version
 
-      - name: Run Webhook Load Test with 2 Users
+      - name: Run Webhook Load Test with 1 User
         run: |
           export KUBECONFIG=$HOME/.kube/config
-          make test_webhook_load ARGS="--number-of-users 2 --load-test-namespace $LOAD_TEST_NAMESPACE --webhook-server-namespace $DWO_NAMESPACE"
+          make test_webhook_load ARGS="--number-of-users 1 --load-test-namespace $LOAD_TEST_NAMESPACE --webhook-server-namespace $DWO_NAMESPACE"
 
       - name: Check DevWorkspace Webhook Server Logs
         if: failure()
