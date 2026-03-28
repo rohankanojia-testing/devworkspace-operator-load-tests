@@ -42,7 +42,6 @@ const NUMBER_OF_USERS = Number(__ENV.N_USERS || 50);
 const TEST_NAMESPACE = __ENV.LOAD_TEST_NAMESPACE || 'dw-webhook-loadtest';
 const WEBHOOK_NAMESPACE = __ENV.WEBHOOK_NAMESPACE || 'openshift-operators';
 const K8S_API = __ENV.KUBE_API || 'https://api.crc.testing:6443/';
-const MIN_RUNNING_DEVWORKSPACES_FRACTION = Number(__ENV.MIN_RUNNING_FRACTION || 0.8);
 const WEBHOOK_POD_SELECTOR = 'app.kubernetes.io/name=devworkspace-webhook-server';
 
 const devWorkspaceReadyTimeout = Number(__ENV.DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS || 120);
@@ -82,7 +81,8 @@ export const options = {
 
         'webhook_pod_restarts_total': ['value == 0'],
 
-        'exec_skipped_due_to_pod_not_ready': ['count<' + Math.ceil(NUMBER_OF_USERS * 0.05)], // Less than 5% pods not ready
+        // All workspaces must be ready - no skipped exec attempts allowed
+        'exec_skipped_due_to_pod_not_ready': ['count == 0'],
 
         // Webhook timeout thresholds - fail if webhooks timeout (indicates saturation)
         'mutation_webhook_timeout_500': ['count == 0'],
@@ -110,11 +110,15 @@ export function setup() {
 
     const readyCount = waitUntilAllDevWorkspacesAreRunning(TEST_NAMESPACE, adminHeaders, userList.length);
     devWorkspacesReady.add(readyCount);
-    if (readyCount < Math.ceil(users.length * MIN_RUNNING_DEVWORKSPACES_FRACTION)) {
-        console.warn(`[WARN] Only ${readyCount}/${users.length} devworkspaces ready, skipping exec for missing ones`);
-    }
 
     const setupDurationSec = (Date.now() - setupStartTime) / 1000;
+
+    if (readyCount < userList.length) {
+        const msg = `[SETUP FAILED] Only ${readyCount}/${userList.length} workspaces became ready in ${setupDurationSec.toFixed(2)}s. All workspaces must be ready to proceed.`;
+        console.error(msg);
+        throw new Error(msg);
+    }
+
     console.log(`[SETUP] Environment ready in ${setupDurationSec.toFixed(2)}s. ${readyCount}/${userList.length} workspaces running.`);
 
     // This returned object becomes the 'data' argument in the default function
@@ -289,6 +293,30 @@ function validateDevWorkspacePodIdentityImmutability(headers, dwName) {
         "Label 'controller.devfile.io/creator' is set by the controller and cannot be updated");
 }
 
+function checkForFailedDevWorkspaces(devWorkspaces) {
+    const failedWorkspaces = devWorkspaces.filter(dw => dw.status?.phase === 'Failed');
+    if (failedWorkspaces.length === 0) {
+        return;
+    }
+
+    console.error(`[SETUP FAILED] ${failedWorkspaces.length} DevWorkspace(s) failed:`);
+    failedWorkspaces.forEach(dw => {
+        const name = dw.metadata?.name || 'unknown';
+        const message = dw.status?.message || 'No failure message available';
+        const conditions = dw.status?.conditions || [];
+        console.error(`  - ${name}: ${message}`);
+
+        // Log additional details from conditions
+        conditions.forEach(condition => {
+            if (condition.status === 'False' || condition.reason === 'Failed') {
+                console.error(`    Condition: ${condition.type}, Reason: ${condition.reason}, Message: ${condition.message}`);
+            }
+        });
+    });
+
+    throw new Error(`${failedWorkspaces.length} DevWorkspace(s) failed. Check logs above for details.`);
+}
+
 function waitUntilAllDevWorkspacesAreRunning(namespace, headers, expectedCount) {
     const pollInterval = 5; // seconds
     const maxAttempts = devWorkspaceReadyTimeout / pollInterval;
@@ -301,10 +329,16 @@ function waitUntilAllDevWorkspacesAreRunning(namespace, headers, expectedCount) 
             console.error(`[ERROR] GET DevWorkspaces returned status ${error}`);
         } else {
             try {
+                checkForFailedDevWorkspaces(devWorkspaces);
+
                 runningDevWorkspaces = devWorkspaces.filter(dw => dw.status?.phase === 'Running' || dw.status?.phase === 'Ready').length;
 
                 if (runningDevWorkspaces >= expectedCount) return expectedCount; // all ready
             } catch (e) {
+                // Re-throw if it's our intentional failure
+                if (e.message && e.message.includes('DevWorkspace(s) failed')) {
+                    throw e;
+                }
                 console.error(`[ERROR] Failed to parse DevWorkspaces: ${e.message}`);
             }
         }
