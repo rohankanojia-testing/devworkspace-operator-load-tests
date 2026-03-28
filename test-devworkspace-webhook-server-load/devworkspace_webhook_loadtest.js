@@ -2,7 +2,7 @@ import http from 'k6/http';
 import {check, sleep} from 'k6';
 import exec from 'k6/execution';
 import {SharedArray} from 'k6/data';
-import {Counter, Gauge, Trend} from 'k6/metrics';
+import {Counter, Gauge, Rate, Trend} from 'k6/metrics';
 import {textSummary} from "https://jslib.k6.io/k6-summary/0.0.1/index.js";
 import {
     checkPodRestarts,
@@ -27,7 +27,7 @@ export const execUnexpectedAllowed = new Counter('exec_unexpected_allowed_total'
 export const execUnexpectedDenied = new Counter('exec_unexpected_denied_total');
 export const execLatency = new Trend('exec_latency_ms');
 export const createLatency = new Trend('create_latency_ms');
-export const invalidMutatingDeny = new Counter('invalid_mutating_deny_total');
+export const immutableLabelsEnforced = new Rate('immutable_labels_enforced_rate');
 export const mutatingWebhookLatency = new Trend('mutating_latency_ms');
 export const validatingWebhookLatency = new Trend('validating_latency_ms');
 export const webhookCpuMillicores = new Trend('average_webhook_cpu_millicores');
@@ -77,7 +77,7 @@ export const options = {
         'exec_denied_total': [`count == ${NUMBER_OF_USERS * NUMBER_OF_USERS - NUMBER_OF_USERS}`],
         'exec_unexpected_allowed_total': ['count==0'],
         'exec_unexpected_denied_total': ['count==0'],
-        'invalid_mutating_deny_total': [`count == ${2 * NUMBER_OF_USERS}`],
+        'immutable_labels_enforced_rate': ['rate >= 1.0'], // 100% of mutation attempts must be blocked
 
         'webhook_pod_restarts_total': ['value == 0'],
 
@@ -196,8 +196,8 @@ export function handleSummary(data) {
         'webhook_http_errors_total',
         'webhook_pod_restarts_total',
 
-        // Validation metrics
-        'invalid_mutating_deny_total',
+        // Immutability enforcement metrics
+        'immutable_labels_enforced_rate',
 
         // Webhook timeout metrics
         'mutation_webhook_timeout_500',
@@ -483,10 +483,10 @@ function assertForbidden(res, resourceKind, resourceName, expectedMessage) {
     const messageOk =
         body?.message?.includes(expectedMessage);
 
-    if (statusOk && reasonOk && messageOk) {
-        // Clean denial - this is the expected behavior
-        invalidMutatingDeny.add(1);
-    } else {
+    const blocked = statusOk && reasonOk && messageOk;
+    immutableLabelsEnforced.add(blocked);
+
+    if (!blocked) {
         console.error(
             `[ERROR] Unauthorized ${resourceKind} modification allowed
 resource=${resourceName}
