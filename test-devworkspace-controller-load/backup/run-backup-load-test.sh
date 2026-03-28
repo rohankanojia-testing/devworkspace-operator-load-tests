@@ -543,8 +543,13 @@ run_k6_binary_test() {
       log_info "Derived REGISTRY_URL from DWOC config: $REGISTRY_URL"
     else
       log_warning "REGISTRY_URL not set and could not derive from DWOC config"
+      REGISTRY_URL=""
     fi
   fi
+
+  # Set defaults for registry credentials if not provided
+  REGISTRY_USERNAME="${REGISTRY_USERNAME:-}"
+  REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-}"
 
   if IN_CLUSTER='false' \
     KUBE_TOKEN="${KUBE_TOKEN}" \
