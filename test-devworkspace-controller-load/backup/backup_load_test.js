@@ -89,11 +89,11 @@ export const options = {
 };
 
 // Metrics
-const backupJobsTotal = new Counter('backup_jobs_total');
-const backupJobsSucceeded = new Counter('backup_jobs_succeeded');
-const backupJobsFailed = new Counter('backup_jobs_failed');
+const backupJobsTotal = new Gauge('backup_jobs_total');
+const backupJobsSucceeded = new Gauge('backup_jobs_succeeded');
+const backupJobsFailed = new Gauge('backup_jobs_failed');
 const backupJobsRunning = new Gauge('backup_jobs_running');
-const backupPodsTotal = new Counter('backup_pods_total');
+const backupPodsTotal = new Gauge('backup_pods_total');
 const workspacesStopped = new Counter('workspaces_stopped');
 const workspacesBackedUp = new Counter('workspaces_backed_up');
 const backupSuccessRate = new Gauge('backup_success_rate');
@@ -424,14 +424,21 @@ function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryCon
     // Get job metrics (current snapshot)
     // ----------------------------------------
     const metrics = getBackupJobMetrics();
-    const { cumulativeTotal, cumulativePodCount, running, jobs } = metrics;
+    const { cumulativeTotal, cumulativeSucceeded, cumulativeFailed, cumulativePodCount, running } = metrics;
 
     // ----------------------------------------
-    // Update metrics (no deltas)
+    // Update metrics (use Map/Set sizes directly)
     // ----------------------------------------
     backupJobsTotal.add(cumulativeTotal);
-    backupPodsTotal.add(cumulativePodCount);
+    backupJobsSucceeded.add(cumulativeSucceeded);
+    backupJobsFailed.add(cumulativeFailed);
     backupJobsRunning.add(running);
+    backupPodsTotal.add(cumulativePodCount);
+
+    // Calculate and record success rate
+    if (cumulativeTotal > 0) {
+      backupSuccessRate.add(cumulativeSucceeded / cumulativeTotal);
+    }
 
     // ----------------------------------------
     // Registry check (source of truth)
@@ -439,7 +446,8 @@ function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryCon
     let backedUpCount = 0;
 
     for (const dw of devWorkspaces) {
-      const repo = dw.metadata.name;
+      // Construct repo path: namespace/devworkspace-name
+      const repo = `${dw.metadata.namespace}/${dw.metadata.name}`;
 
       let token = tokenCache.get(repo);
       if (!token) {
@@ -993,7 +1001,8 @@ function getRegistryToken(registryConfig, repo) {
 }
 
 function isWorkspaceBackedUp(dw, registryConfig) {
-  const repo = dw.metadata.name;
+  // Construct repo path: namespace/devworkspace-name
+  const repo = `${dw.metadata.namespace}/${dw.metadata.name}`;
   const token = getRegistryToken(registryConfig, repo);
 
   if (!token) return false;
