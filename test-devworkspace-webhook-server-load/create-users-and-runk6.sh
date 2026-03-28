@@ -10,7 +10,7 @@ N_USERS="${N_USERS:-10}"
 LOAD_TEST_NAMESPACE="${LOAD_TEST_NAMESPACE:-dw-webhook-loadtest}"
 WEBHOOK_NAMESPACE="${WEBHOOK_NAMESPACE:-openshift-operators}"
 DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS="${DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS:-7200}"
-DEVWORKSPACE_LINK="https://gist.githubusercontent.com/rohanKanojia/a68f7079c6045ea245a2e512dcc2b062/raw/cb2f0d7dce0badd9c8673d39b1b88de2965c3246/dw-restricted-access-annotation.json"
+DEVWORKSPACE_LINK="${DEVWORKSPACE_LINK-https://gist.githubusercontent.com/rohanKanojia/a68f7079c6045ea245a2e512dcc2b062/raw/cb2f0d7dce0badd9c8673d39b1b88de2965c3246/dw-restricted-access-annotation.json}"
 
 DW_API_GROUP="workspace.devfile.io"
 DW_RESOURCE="devworkspaces"
