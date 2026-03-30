@@ -34,7 +34,7 @@ VERIFY_RESTORE="true"  # Enable restore verification by default
 MAX_RESTORE_SAMPLES="10"  # Number of workspaces to restore for verification
 WAIT_FOR_READY="true"  # Wait for ALL DevWorkspaces to be ready before starting backup
 WAIT_TIMEOUT_MINUTES="30"  # Maximum time to wait for DevWorkspaces to be ready
-BACKUP_SCHEDULE=""  # Override backup schedule (e.g., "*/5 * * * *"), empty means don't change
+BACKUP_SCHEDULE="*/2 * * * *"  # Override backup schedule (e.g., "*/5 * * * *"), empty means don't change
 ORIGINAL_BACKUP_SCHEDULE=""  # Store original schedule for restoration
 TOKEN_TTL="6h"  # ServiceAccount token duration for backup load tests
 MIN_KUBECTL_VERSION="1.24.0"
@@ -158,7 +158,7 @@ get_backup_schedule() {
   # Get current backup schedule from DWOC
   local schedule
   schedule=$(kubectl get devworkspaceoperatorconfig -n "$DWO_NAMESPACE" devworkspace-operator-config \
-    -o jsonpath='{.config.workspace.backupSchedule}' 2>/dev/null || echo "")
+    -o jsonpath='{.config.workspace.backupCronJob.schedule}' 2>/dev/null || echo "")
 
   if [[ -z "$schedule" ]]; then
     log_warning "Could not retrieve current backup schedule from DWOC"
@@ -178,7 +178,7 @@ set_backup_schedule() {
   log_info "Setting backup schedule to: $new_schedule"
 
   if kubectl patch devworkspaceoperatorconfig -n "$DWO_NAMESPACE" devworkspace-operator-config \
-    --type=merge -p "{\"config\":{\"workspace\":{\"backupSchedule\":\"$new_schedule\"}}}" >/dev/null 2>&1; then
+    --type=merge -p "{\"config\":{\"workspace\":{\"backupCronJob\":{\"schedule\":\"$new_schedule\"}}}}" >/dev/null 2>&1; then
     log_success "Backup schedule updated to: $new_schedule"
     return 0
   else
@@ -196,7 +196,7 @@ restore_backup_schedule() {
   log_info "Restoring original backup schedule: $ORIGINAL_BACKUP_SCHEDULE"
 
   if kubectl patch devworkspaceoperatorconfig -n "$DWO_NAMESPACE" devworkspace-operator-config \
-    --type=merge -p "{\"config\":{\"workspace\":{\"backupSchedule\":\"$ORIGINAL_BACKUP_SCHEDULE\"}}}" >/dev/null 2>&1; then
+    --type=merge -p "{\"config\":{\"workspace\":{\"backupCronJob\":{\"schedule\":\"$ORIGINAL_BACKUP_SCHEDULE\"}}}}" >/dev/null 2>&1; then
     log_success "Backup schedule restored to: $ORIGINAL_BACKUP_SCHEDULE"
     return 0
   else
@@ -535,7 +535,7 @@ run_k6_binary_test() {
   # Derive REGISTRY_URL from DWOC config if not set
   if [[ -z "${REGISTRY_URL:-}" ]]; then
     REGISTRY_PATH=$(kubectl get devworkspaceoperatorconfig devworkspace-operator-config -n "${DWO_NAMESPACE}" \
-      -o jsonpath='{.config.workspace.backupCronJob.repositoryUrl}' 2>/dev/null || echo "")
+      -o jsonpath='{.config.workspace.backupCronJob.registry.path}' 2>/dev/null || echo "")
 
     if [[ -n "$REGISTRY_PATH" ]]; then
       # Extract just the registry host (e.g., "quay.io" from "quay.io/username/repo")

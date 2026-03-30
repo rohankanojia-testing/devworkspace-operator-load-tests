@@ -37,14 +37,12 @@ const loadTestNamespace = __ENV.LOAD_TEST_NAMESPACE || "loadtest-devworkspaces";
 const backupMonitorDurationMinutes = Number(__ENV.BACKUP_MONITOR_DURATION_MINUTES || 30);
 const dwocConfigType = __ENV.DWOC_CONFIG_TYPE || 'correct';
 const verifyRestore = __ENV.VERIFY_RESTORE !== 'false'; // Default to true, can be disabled with VERIFY_RESTORE=false
-const maxRestoreSamples = Number(__ENV.MAX_RESTORE_SAMPLES || 10); // Maximum number of workspaces to restore for verification
-const backupSchedule = __ENV.BACKUP_SCHEDULE || ""; // Cron schedule for backup jobs (e.g., "*/10 * * * *")
+const maxRestoreSamples = Number(__ENV.MAX_RESTORE_SAMPLES || 10); // Maximum number of workspaces to restore for verification// Cron schedule for backup jobs (e.g., "*/10 * * * *")
 const backupJobLabel = "controller.devfile.io/backup-job=true";
 let ETCD_NAMESPACE = 'openshift-etcd';
 let ETCD_POD_NAME_PATTERN = 'etcd';
 const ETCD_POD_SELECTOR = `app=${ETCD_POD_NAME_PATTERN}`;
 const OPERATOR_POD_SELECTOR = 'app.kubernetes.io/name=devworkspace-controller';
-const monitorPollInterval = 5; // seconds between monitoring polls
 
 // Parse initial restart counts from environment variables
 const initialEtcdRestarts = __ENV.INITIAL_ETCD_RESTARTS ? JSON.parse(__ENV.INITIAL_ETCD_RESTARTS) : {};
@@ -52,12 +50,11 @@ const initialOperatorRestarts = __ENV.INITIAL_OPERATOR_RESTARTS ? JSON.parse(__E
 
 const headers = createAuthHeaders(token);
 
-// Track jobs by UID to handle garbage collection
-const seenJobUids = new Set();
-const succeededJobUids = new Set();
-const failedJobUids = new Set();
-const backedUpWorkspaceIds = new Set();  // Track workspace IDs that were backed up
-const jobPodCounts = new Map();  // Track cumulative pod count per job UID
+// Track backup status with a simple map
+const backupStatusMap = new Map();  // devworkspace_name -> {backed_up: boolean, namespace: string, workspaceId: string}
+const workspaceIdToNameMap = new Map();  // devworkspace_id -> devworkspace_name for quick lookup
+const seenJobUids = new Set();  // Track which jobs we've already processed
+const totalPodsCreated = new Map();  // Track cumulative pod count per job UID
 
 export const options = {
   scenarios: {
@@ -175,6 +172,26 @@ function stopWorkspacesAndMonitorBackups(data) {
     throw new Error(errorMsg);
   }
 
+  // Initialize backup tracking map
+  console.log("Initializing backup tracking map...");
+  for (const dw of devWorkspaces) {
+    const name = dw.metadata.name;
+    const namespace = dw.metadata.namespace;
+    const workspaceId = dw.status && dw.status['devworkspaceId'];
+
+    backupStatusMap.set(name, {
+      backed_up: false,
+      namespace: namespace,
+      workspaceId: workspaceId
+    });
+
+    // Create reverse lookup map
+    if (workspaceId) {
+      workspaceIdToNameMap.set(workspaceId, name);
+    }
+  }
+  console.log(`Tracking ${backupStatusMap.size} workspaces for backup\n`);
+
   // Step 2: Stop all workspaces
   console.log("Step 2: Stopping all DevWorkspaces...");
   const stoppedCount = stopAllDevWorkspaces(devWorkspaces);
@@ -198,7 +215,7 @@ function stopWorkspacesAndMonitorBackups(data) {
 
   // Step 4: Monitor backup jobs and operator/etcd metrics
   console.log("\nStep 4: Monitoring backup Jobs and system metrics...");
-  monitorBackupJobsAndMetrics(backupMonitorDurationMinutes, devWorkspaces, registryConfig);
+  monitorBackupJobsAndMetrics(backupMonitorDurationMinutes);
 
   // Step 5: Verify all workspaces were backed up
   console.log("\nStep 5: Verifying backup coverage...");
@@ -311,173 +328,154 @@ function getBackupJobs() {
   return data.items || [];
 }
 
-function getBackupJobMetrics() {
-  const jobs = getBackupJobs();
 
-  let currentRunning = 0;
-  let currentTotalPods = 0;
-
-  for (const job of jobs) {
-    const jobUid = job.metadata?.uid;
-    if (!jobUid) continue;
-
-    const status = job.status || {};
-    const conditions = status.conditions || [];
-    const labels = job.metadata?.labels || {};
-    const workspaceId = labels['controller.devfile.io/devworkspace_id'];
-
-    // Track this job if we haven't seen it before
-    if (!seenJobUids.has(jobUid)) {
-      seenJobUids.add(jobUid);
-    }
-
-    // Check if job has succeeded and we haven't counted it yet
-    if (status.succeeded === 1 && !succeededJobUids.has(jobUid)) {
-      succeededJobUids.add(jobUid);
-
-      // Track workspace ID for successful backups (cumulative)
-      if (workspaceId) {
-        backedUpWorkspaceIds.add(workspaceId);
-      }
-    }
-    // Check if job has permanently failed and we haven't counted it yet
-    else if (conditions.some(c => c.type === 'Failed' && c.status === 'True') && !failedJobUids.has(jobUid)) {
-      failedJobUids.add(jobUid);
-    }
-
-    // Count currently running jobs (not in succeeded or failed state)
-    if (status.succeeded !== 1 && !conditions.some(c => c.type === 'Failed' && c.status === 'True')) {
-      currentRunning++;
-    }
-
-    // Track pods created by this job (cumulative per job)
-    const activePods = status.active || 0;
-    const succeededPods = status.succeeded || 0;
-    const failedPods = status.failed || 0;
-    const jobPodCount = activePods + succeededPods + failedPods;
-
-    // Update max pod count for this job (handles retries and updates)
-    const previousMaxPods = jobPodCounts.get(jobUid) || 0;
-    if (jobPodCount > previousMaxPods) {
-      jobPodCounts.set(jobUid, jobPodCount);
-    }
-
-    currentTotalPods += jobPodCount;
-  }
-
-  // Calculate cumulative pod count from all tracked jobs
-  let cumulativePodCount = 0;
-  for (const count of jobPodCounts.values()) {
-    cumulativePodCount += count;
-  }
-
-  // Cumulative totals from sets (persist even when jobs are garbage collected)
-  const cumulativeTotal = seenJobUids.size;
-  const cumulativeSucceeded = succeededJobUids.size;
-  const cumulativeFailed = failedJobUids.size;
-
-  return {
-    total: cumulativeTotal,
-    succeeded: cumulativeSucceeded,
-    failed: cumulativeFailed,
-    running: currentRunning,
-    totalPods: currentTotalPods,  // Current pods from existing jobs
-    cumulativePodCount,  // Cumulative pods (persists after garbage collection)
-    cumulativeTotal,
-    cumulativeSucceeded,
-    cumulativeFailed,
-    jobs,
-  };
-}
-
-function monitorBackupJobsAndMetrics(durationMinutes, devWorkspaces, registryConfig) {
+function monitorBackupJobsAndMetrics(durationMinutes) {
   const endTime = Date.now() + (durationMinutes * 60 * 1000);
+  const pollInterval = 1; // Poll every 1 second as requested
 
-  console.log("\nMonitoring backup jobs (registry-driven termination)...\n");
+  console.log("\nMonitoring backup jobs (map-based tracking)...\n");
+  console.log(`Tracking ${backupStatusMap.size} workspaces for backup completion\n`);
+
+  let totalJobsSeen = 0;
+  let totalSucceededJobs = 0;
+  let totalFailedJobs = 0;
 
   while (Date.now() < endTime) {
     // ----------------------------------------
-    // 1. Get job metrics (ONLY ONCE)
+    // 1. Poll jobs and pods
     // ----------------------------------------
-    const metrics = getBackupJobMetrics();
-    const {
-      cumulativeTotal,
-      cumulativeSucceeded,
-      cumulativeFailed,
-      cumulativePodCount,
-      running
-    } = metrics;
+    const jobs = getBackupJobs();
+    let currentRunning = 0;
 
     // ----------------------------------------
-    // 2. Update metrics
+    // 2. Parse job status and update backup map
     // ----------------------------------------
-    backupJobsTotal.add(cumulativeTotal);
-    backupJobsSucceeded.add(cumulativeSucceeded);
-    backupJobsFailed.add(cumulativeFailed);
-    backupJobsRunning.add(running);
-    backupPodsTotal.add(cumulativePodCount);
+    for (const job of jobs) {
+      const jobUid = job.metadata?.uid;
+      if (!jobUid) continue;
 
-    if (cumulativeTotal > 0) {
-      backupSuccessRate.add(cumulativeSucceeded / cumulativeTotal);
-    }
+      const status = job.status || {};
+      const conditions = status.conditions || [];
+      const labels = job.metadata?.labels || {};
+      const workspaceId = labels['controller.devfile.io/devworkspace_id'];
 
-    // ----------------------------------------
-    // 3. Registry check (BATCH, NOT per-DW)
-    // ----------------------------------------
-    let backedUpCount = 0;
+      // Track new jobs
+      if (!seenJobUids.has(jobUid)) {
+        seenJobUids.add(jobUid);
+        totalJobsSeen++;
+      }
 
-    if (!registryConfig.username || !registryConfig.password) {
-      // fallback to job success
-      backedUpCount = cumulativeSucceeded;
-    } else {
-      const repoSet = getAllReposAsSet(
-          registryConfig.registry,
-          registryConfig.username,
-          registryConfig.password
-      );
+      // Track pod counts
+      const activePods = status.active || 0;
+      const succeededPods = status.succeeded || 0;
+      const failedPods = status.failed || 0;
+      const jobPodCount = activePods + succeededPods + failedPods;
 
-      for (const dw of devWorkspaces) {
-        const repoPath = `${dw.metadata.namespace}/${dw.metadata.name}`;
+      const previousMaxPods = totalPodsCreated.get(jobUid) || 0;
+      if (jobPodCount > previousMaxPods) {
+        totalPodsCreated.set(jobUid, jobPodCount);
+      }
 
-        if (repoSet.has(repoPath)) {
-          backedUpCount++;
+      // Check if job succeeded
+      if (status.succeeded === 1) {
+        // Find devworkspace name from workspace ID
+        if (workspaceId && workspaceIdToNameMap.has(workspaceId)) {
+          const dwName = workspaceIdToNameMap.get(workspaceId);
+          const statusInfo = backupStatusMap.get(dwName);
+
+          // Update map if not already marked as backed up
+          if (statusInfo && !statusInfo.backed_up) {
+            statusInfo.backed_up = true;
+            backupStatusMap.set(dwName, statusInfo);
+            console.log(`  ✅ Backup completed for: ${statusInfo.namespace}/${dwName}`);
+          }
         }
+      }
+      // Check if job permanently failed
+      else if (conditions.some && conditions.some(c => c.type === 'Failed' && c.status === 'True')) {
+        // Count as failed
+        if (workspaceId && workspaceIdToNameMap.has(workspaceId)) {
+          const dwName = workspaceIdToNameMap.get(workspaceId);
+          console.warn(`  ❌ Backup job failed for: ${dwName} (workspace ID: ${workspaceId})`);
+        }
+      }
+      // Still running
+      else {
+        currentRunning++;
       }
     }
 
     // ----------------------------------------
-    // 4. Logging
+    // 3. Calculate metrics
+    // ----------------------------------------
+    let backedUpCount = 0;
+    for (const [name, info] of backupStatusMap) {
+      if (info.backed_up) {
+        backedUpCount++;
+      }
+    }
+
+    // Count succeeded and failed jobs
+    totalSucceededJobs = backedUpCount;
+    totalFailedJobs = totalJobsSeen - totalSucceededJobs - currentRunning;
+
+    // Calculate total pods
+    let cumulativePodCount = 0;
+    for (const count of totalPodsCreated.values()) {
+      cumulativePodCount += count;
+    }
+
+    // ----------------------------------------
+    // 4. Update metrics
+    // ----------------------------------------
+    backupJobsTotal.add(totalJobsSeen);
+    backupJobsSucceeded.add(totalSucceededJobs);
+    backupJobsFailed.add(totalFailedJobs);
+    backupJobsRunning.add(currentRunning);
+    backupPodsTotal.add(cumulativePodCount);
+
+    if (totalJobsSeen > 0) {
+      backupSuccessRate.add(totalSucceededJobs / totalJobsSeen);
+    }
+
+    // ----------------------------------------
+    // 5. Logging
     // ----------------------------------------
     console.log(
-        `Jobs observed=${cumulativeTotal}, ` +
-        `pods observed=${cumulativePodCount}, ` +
-        `running=${running}, ` +
-        `backedUp=${backedUpCount}/${devWorkspaces.length}`
+        `Jobs: total=${totalJobsSeen}, ` +
+        `succeeded=${totalSucceededJobs}, ` +
+        `failed=${totalFailedJobs}, ` +
+        `running=${currentRunning}, ` +
+        `pods=${cumulativePodCount}, ` +
+        `backedUp=${backedUpCount}/${backupStatusMap.size}`
     );
 
     // ----------------------------------------
-    // 5. ✅ TERMINATION (robust)
+    // 6. Termination - stop when all workspaces backed up
     // ----------------------------------------
-    if (devWorkspaces.length > 0) {
-      if (backedUpCount === devWorkspaces.length) {
-        console.log("✅ All workspaces backed up (verified via registry)");
-        break;
-      }
+    if (backedUpCount === backupStatusMap.size) {
+      console.log("\n✅ All workspaces backed up!");
+      break;
+    }
 
-      // also break if everything finished but some failed
-      if (cumulativeSucceeded + cumulativeFailed === devWorkspaces.length) {
-        console.warn("⚠️ All jobs completed but some backups missing in registry");
-        break;
+    // Also stop if all jobs completed (success or failure)
+    if (currentRunning === 0 && totalJobsSeen === backupStatusMap.size) {
+      if (backedUpCount < backupStatusMap.size) {
+        console.warn(`\n⚠️ All jobs completed but only ${backedUpCount}/${backupStatusMap.size} workspaces backed up`);
       }
+      break;
     }
 
     // ----------------------------------------
-    // 6. System checks
+    // 7. System checks (every 5 seconds to reduce overhead)
     // ----------------------------------------
-    checkOperatorMetrics();
-    checkSystemEtcdMetrics();
+    const secondsElapsed = Math.floor((Date.now() - (endTime - durationMinutes * 60 * 1000)) / 1000);
+    if (secondsElapsed % 5 === 0) {
+      checkOperatorMetrics();
+      checkSystemEtcdMetrics();
+    }
 
-    sleep(monitorPollInterval);
+    sleep(pollInterval);
   }
 
   console.log("\n📊 Monitoring finished");
@@ -500,39 +498,38 @@ function getImageStreams(namespace) {
 }
 
 function verifyBackupCoverage(devWorkspaces) {
-  // Use cumulative backedUpWorkspaceIds Set (populated during monitoring)
-  // This persists even after jobs are garbage collected
-
-  // Build list of successfully backed up workspaces
+  // Use backup status map to determine which workspaces were backed up
   const backedUpWorkspaces = [];
+  let backedUpCount = 0;
+
   for (const dw of devWorkspaces) {
-    // Use bracket notation for devworkspaceId
-    const dwId = dw.status && dw.status['devworkspaceId'];
-    if (dwId && backedUpWorkspaceIds.has(dwId)) {
+    const name = dw.metadata.name;
+    const namespace = dw.metadata.namespace;
+    const statusInfo = backupStatusMap.get(name);
+
+    if (statusInfo && statusInfo.backed_up) {
+      backedUpCount++;
       backedUpWorkspaces.push({
-        name: dw.metadata.name,
-        namespace: dw.metadata.namespace,
-        workspaceId: dwId,
+        name: name,
+        namespace: namespace,
+        workspaceId: statusInfo.workspaceId,
         originalSpec: dw.spec,
         originalLabels: dw.metadata.labels,
       });
     }
   }
 
-  workspacesBackedUp.add(backedUpWorkspaces.length);
+  workspacesBackedUp.add(backedUpCount);
 
-  console.log(`Backup Coverage (cumulative): ${backedUpWorkspaces.length}/${devWorkspaces.length} workspaces backed up`);
-  console.log(`Note: Tracked from ${backedUpWorkspaceIds.size} unique workspace IDs across all backup cycles`);
+  console.log(`Backup Coverage: ${backedUpCount}/${devWorkspaces.length} workspaces backed up`);
 
-  if (backedUpWorkspaces.length < devWorkspaces.length) {
-    console.warn(`Warning: ${devWorkspaces.length - backedUpWorkspaces.length} workspaces were not backed up`);
+  if (backedUpCount < devWorkspaces.length) {
+    console.warn(`Warning: ${devWorkspaces.length - backedUpCount} workspaces were not backed up`);
 
     // List workspaces that weren't backed up
-    for (const dw of devWorkspaces) {
-      // Use bracket notation for devworkspaceId
-      const dwId = dw.status && dw.status['devworkspaceId'];
-      if (!dwId || !backedUpWorkspaceIds.has(dwId)) {
-        console.warn(`  Not backed up: ${dw.metadata.namespace}/${dw.metadata.name} (ID: ${dwId || 'unknown'})`);
+    for (const [name, info] of backupStatusMap) {
+      if (!info.backed_up) {
+        console.warn(`  Not backed up: ${info.namespace}/${name} (ID: ${info.workspaceId || 'unknown'})`);
       }
     }
   }
@@ -540,6 +537,13 @@ function verifyBackupCoverage(devWorkspaces) {
   // Verify ImageStreams for OpenShift internal registry mode
   if (dwocConfigType === 'openshift-internal') {
     console.log("\nVerifying ImageStream creation for OpenShift internal registry...");
+    // Create a Set of backed up workspace IDs for ImageStream verification
+    const backedUpWorkspaceIds = new Set();
+    for (const [name, info] of backupStatusMap) {
+      if (info.backed_up && info.workspaceId) {
+        backedUpWorkspaceIds.add(info.workspaceId);
+      }
+    }
     verifyImageStreams(devWorkspaces, backedUpWorkspaceIds);
   }
 
@@ -607,51 +611,90 @@ function verifyImageStreams(devWorkspaces, backedUpWorkspaceIds) {
 }
 
 function collectFinalMetrics() {
-  const metrics = getBackupJobMetrics();
+  // Get current job state
+  const jobs = getBackupJobs();
+
+  // Count backed up workspaces from map
+  let backedUpCount = 0;
+  for (const [name, info] of backupStatusMap) {
+    if (info.backed_up) {
+      backedUpCount++;
+    }
+  }
+
+  // Calculate job stats
+  let succeededJobs = 0;
+  let failedJobs = 0;
+  let runningJobs = 0;
+
+  for (const job of jobs) {
+    const status = job.status || {};
+    const conditions = status.conditions || [];
+
+    if (status.succeeded === 1) {
+      succeededJobs++;
+    } else if (conditions.some && conditions.some(c => c.type === 'Failed' && c.status === 'True')) {
+      failedJobs++;
+    } else {
+      runningJobs++;
+    }
+  }
+
+  // Calculate total pods
+  let cumulativePodCount = 0;
+  for (const count of totalPodsCreated.values()) {
+    cumulativePodCount += count;
+  }
+
+  const totalJobsSeen = seenJobUids.size;
 
   console.log("\n======================================");
-  console.log("Final Backup Job Metrics (Cumulative)");
+  console.log("Final Backup Job Metrics");
   console.log("======================================");
-  console.log(`Total Jobs: ${metrics.cumulativeTotal}`);
-  console.log(`Succeeded: ${metrics.cumulativeSucceeded}`);
-  console.log(`Failed (hit backOffLimit): ${metrics.cumulativeFailed}`);
-  console.log(`Running/Pending: ${metrics.running}`);
-  console.log(`Total Pods Created (cumulative): ${metrics.cumulativePodCount}`);
-  console.log(`Current Pods in Existing Jobs: ${metrics.totalPods}`);
-  console.log(`Currently Tracked Jobs: ${metrics.jobs.length} (may be less due to K8s job garbage collection)`);
+  console.log(`Total Jobs Seen: ${totalJobsSeen}`);
+  console.log(`Currently Tracked Jobs: ${jobs.length} (may be less due to K8s garbage collection)`);
+  console.log(`Succeeded Jobs: ${succeededJobs}`);
+  console.log(`Failed Jobs (hit backOffLimit): ${failedJobs}`);
+  console.log(`Running/Pending Jobs: ${runningJobs}`);
+  console.log(`Total Pods Created: ${cumulativePodCount}`);
+  console.log(`Workspaces Backed Up: ${backedUpCount}/${backupStatusMap.size}`);
 
-  if (metrics.cumulativeTotal > 0) {
-    const successRate = ((metrics.cumulativeSucceeded / metrics.cumulativeTotal) * 100).toFixed(2);
-    const failureRate = ((metrics.cumulativeFailed / metrics.cumulativeTotal) * 100).toFixed(2);
-    console.log(`Success Rate: ${successRate}%`);
-    console.log(`Failure Rate: ${failureRate}%`);
+  if (totalJobsSeen > 0) {
+    const successRate = ((backedUpCount / backupStatusMap.size) * 100).toFixed(2);
+    console.log(`Backup Success Rate: ${successRate}%`);
   }
   console.log("======================================\n");
 
   // Show details of permanently failed jobs
-  if (metrics.failed > 0) {
+  const failedJobsList = jobs.filter(job => {
+    const conditions = job.status?.conditions || [];
+    return conditions.some && conditions.some(c => c.type === 'Failed' && c.status === 'True');
+  });
+
+  if (failedJobsList.length > 0) {
     console.log("Failed Jobs Details:");
-    for (const job of metrics.jobs) {
+    for (const job of failedJobsList) {
       const conditions = job.status?.conditions || [];
       const failedCondition = conditions.find(c => c.type === 'Failed' && c.status === 'True');
 
-      if (failedCondition) {
-        const namespace = job.metadata.namespace;
-        const name = job.metadata.name;
-        const podFailures = job.status?.failed || 0;
-        const reason = failedCondition.reason || 'Unknown';
-        const message = failedCondition.message || 'No message';
+      const namespace = job.metadata.namespace;
+      const name = job.metadata.name;
+      const podFailures = job.status?.failed || 0;
+      const reason = failedCondition.reason || 'Unknown';
+      const message = failedCondition.message || 'No message';
 
-        console.log(`  ❌ ${namespace}/${name}`);
-        console.log(`     Pod failures: ${podFailures}, Reason: ${reason}`);
-        console.log(`     Message: ${message}`);
-      }
+      console.log(`  ❌ ${namespace}/${name}`);
+      console.log(`     Pod failures: ${podFailures}, Reason: ${reason}`);
+      console.log(`     Message: ${message}`);
+
+      // Capture and print pod logs for failed backup job
+      captureBackupJobPodLogs(namespace, name);
     }
     console.log("");
   }
 
   // Calculate backup job durations
-  for (const job of metrics.jobs) {
+  for (const job of jobs) {
     const startTime = job.status?.startTime;
     const completionTime = job.status?.completionTime;
 
@@ -714,6 +757,67 @@ function ensureRegistrySecretInNamespace(namespace) {
   }
 
   return true;
+}
+
+function captureBackupJobPodLogs(jobNamespace, jobName) {
+  try {
+    // Get pods for the failed backup job
+    const podListUrl = `${apiServer}/api/v1/namespaces/${jobNamespace}/pods?labelSelector=job-name=${jobName}`;
+    const podListRes = http.get(podListUrl, {headers});
+
+    if (podListRes.status !== 200) {
+      console.log(`     [DEBUG] Failed to get pod list: HTTP ${podListRes.status}`);
+      return;
+    }
+
+    const pods = JSON.parse(podListRes.body).items;
+    if (pods.length === 0) {
+      console.log(`     [DEBUG] No pods found for job (may be deleted already)`);
+      return;
+    }
+
+    // Get logs from the most recent pod (last in the list, usually most recent attempt)
+    const pod = pods[pods.length - 1];
+    const podName = pod.metadata.name;
+    console.log(`     [DEBUG] Found backup job pod: ${podName}`);
+
+    // Try to get pod logs (backup jobs typically use a single container)
+    const logUrl = `${apiServer}/api/v1/namespaces/${jobNamespace}/pods/${podName}/log?tailLines=30`;
+    const logRes = http.get(logUrl, {headers});
+
+    if (logRes.status === 200) {
+      const logs = logRes.body.split('\n').filter(l => l.trim());
+      console.log(`\n     --- Backup Job Pod Logs for ${jobNamespace}/${jobName} ---`);
+      logs.forEach(line => console.log(`     ${line}`));
+      console.log(`     --- End Backup Job Pod Logs ---\n`);
+    } else {
+      console.log(`     [DEBUG] Failed to get logs: HTTP ${logRes.status}`);
+
+      // Try to get pod status for additional context
+      const podPhase = pod.status?.phase || 'Unknown';
+      const containerStatuses = pod.status?.containerStatuses || [];
+
+      console.log(`     [DEBUG] Pod phase: ${podPhase}`);
+
+      if (containerStatuses.length > 0) {
+        const container = containerStatuses[0];
+        if (container.state?.terminated) {
+          console.log(`     [DEBUG] Container terminated - Reason: ${container.state.terminated.reason || 'Unknown'}`);
+          if (container.state.terminated.message) {
+            console.log(`     Termination message: ${container.state.terminated.message}`);
+          }
+          console.log(`     Exit code: ${container.state.terminated.exitCode || 'Unknown'}`);
+        } else if (container.state?.waiting) {
+          console.log(`     [DEBUG] Container waiting - Reason: ${container.state.waiting.reason || 'Unknown'}`);
+          if (container.state.waiting.message) {
+            console.log(`     Waiting message: ${container.state.waiting.message}`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.log(`     [ERROR] Exception in captureBackupJobPodLogs: ${err.message}`);
+  }
 }
 
 function captureRestoreFailureLogs(namespace, workspaceName) {
@@ -952,57 +1056,4 @@ export function handleSummary(data) {
   }
 
   return backupLoadTestSummaryReport;
-}
-function checkRepositoryExists(registry, username, password, repoPath) {
-  // Use Docker Registry HTTP API v2 to check if repository exists
-  // Try to list tags - if it succeeds, the repo exists
-  const url = `https://${registry}/v2/${username}/${repoPath}/tags/list`;
-
-  const res = http.get(url, {
-    headers: {
-      Authorization: `Basic ${encoding.b64encode(`${username}:${password}`)}`
-    }
-  });
-
-  // 200 = repo exists with tags
-  // 404 = repo doesn't exist
-  // Other errors = treat as not backed up yet
-  return res.status === 200;
-}
-
-function getAllReposAsSet(registry, username, password) {
-  const repos = [];
-  let page = 1;
-  const pageSize = 100;
-
-  while (true) {
-    const url = `https://${registry}/api/v1/repository?namespace=${username}&page=${page}&limit=${pageSize}`;
-
-    const res = http.get(url, {
-      headers: {
-        // ✅ Prefer Bearer token if password is actually a token
-        Authorization: `Bearer ${password}`
-      }
-    });
-
-    if (res.status !== 200) {
-      console.warn(`Failed to fetch repos (page ${page}): ${res.status}`);
-      break;
-    }
-
-    const data = JSON.parse(res.body);
-    const batch = data.repositories || [];
-
-    if (batch.length === 0) break;
-
-    for (const repo of batch) {
-      // ✅ Correct path for matching
-      repos.push(`${username}/${repo.name}`);
-    }
-
-    if (batch.length < pageSize) break;
-    page++;
-  }
-
-  return new Set(repos);
 }
