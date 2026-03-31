@@ -55,6 +55,8 @@ const backupStatusMap = new Map();  // devworkspace_name -> {backed_up: boolean,
 const workspaceIdToNameMap = new Map();  // devworkspace_id -> devworkspace_name for quick lookup
 const seenJobUids = new Set();  // Track which jobs we've already processed
 const totalPodsCreated = new Map();  // Track cumulative pod count per job UID
+const jobsPerWorkspaceId = new Map();  // workspace_id -> count of jobs created for that workspace
+const permanentlyFailedJobUids = new Set();  // Track jobs that hit Failed=True condition
 
 export const options = {
   scenarios: {
@@ -88,13 +90,16 @@ export const options = {
 // Metrics
 const backupJobsTotal = new Gauge('backup_jobs_total');
 const backupJobsSucceeded = new Gauge('backup_jobs_succeeded');
-const backupJobsFailed = new Gauge('backup_jobs_failed');
+const backupJobsFailed = new Gauge('backup_jobs_failed');  // All non-succeeded, non-running jobs (legacy, less accurate)
+const backupJobsPermanentlyFailed = new Gauge('backup_jobs_permanently_failed');  // Jobs with Failed=True condition
 const backupJobsRunning = new Gauge('backup_jobs_running');
 const backupPodsTotal = new Gauge('backup_pods_total');
 const workspacesStopped = new Counter('workspaces_stopped');
 const workspacesBackedUp = new Counter('workspaces_backed_up');
 const backupSuccessRate = new Gauge('backup_success_rate');
 const backupJobDuration = new Trend('backup_job_duration');
+const backupJobsPerWorkspace = new Gauge('backup_jobs_per_workspace');  // Average jobs per workspace
+const backupMaxJobsPerWorkspace = new Gauge('backup_max_jobs_per_workspace');  // Max jobs for any single workspace
 const imageStreamsCreated = new Counter('imagestreams_created');
 const imageStreamsExpected = new Counter('imagestreams_expected');
 const operatorCpu = new Trend('average_operator_cpu');
@@ -363,6 +368,12 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
       if (!seenJobUids.has(jobUid)) {
         seenJobUids.add(jobUid);
         totalJobsSeen++;
+
+        // Track jobs per workspace
+        if (workspaceId) {
+          const currentCount = jobsPerWorkspaceId.get(workspaceId) || 0;
+          jobsPerWorkspaceId.set(workspaceId, currentCount + 1);
+        }
       }
 
       // Track pod counts
@@ -393,6 +404,11 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
       }
       // Check if job permanently failed
       else if (conditions.some && conditions.some(c => c.type === 'Failed' && c.status === 'True')) {
+        // Track permanently failed jobs
+        if (!permanentlyFailedJobUids.has(jobUid)) {
+          permanentlyFailedJobUids.add(jobUid);
+        }
+
         // Count as failed
         if (workspaceId && workspaceIdToNameMap.has(workspaceId)) {
           const dwName = workspaceIdToNameMap.get(workspaceId);
@@ -418,6 +434,7 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
     // Count succeeded and failed jobs
     totalSucceededJobs = backedUpCount;
     totalFailedJobs = totalJobsSeen - totalSucceededJobs - currentRunning;
+    const totalPermanentlyFailedJobs = permanentlyFailedJobUids.size;
 
     // Calculate total pods
     let cumulativePodCount = 0;
@@ -425,14 +442,33 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
       cumulativePodCount += count;
     }
 
+    // Calculate jobs per workspace metrics
+    let totalWorkspacesWithJobs = jobsPerWorkspaceId.size;
+    let maxJobsForAnyWorkspace = 0;
+    let avgJobsPerWorkspace = 0;
+
+    if (totalWorkspacesWithJobs > 0) {
+      let totalJobsAcrossWorkspaces = 0;
+      for (const count of jobsPerWorkspaceId.values()) {
+        totalJobsAcrossWorkspaces += count;
+        if (count > maxJobsForAnyWorkspace) {
+          maxJobsForAnyWorkspace = count;
+        }
+      }
+      avgJobsPerWorkspace = totalJobsAcrossWorkspaces / totalWorkspacesWithJobs;
+    }
+
     // ----------------------------------------
     // 4. Update metrics
     // ----------------------------------------
     backupJobsTotal.add(totalJobsSeen);
     backupJobsSucceeded.add(totalSucceededJobs);
-    backupJobsFailed.add(totalFailedJobs);
+    backupJobsFailed.add(totalFailedJobs);  // Legacy metric
+    backupJobsPermanentlyFailed.add(totalPermanentlyFailedJobs);  // More accurate
     backupJobsRunning.add(currentRunning);
     backupPodsTotal.add(cumulativePodCount);
+    backupJobsPerWorkspace.add(avgJobsPerWorkspace);
+    backupMaxJobsPerWorkspace.add(maxJobsForAnyWorkspace);
 
     if (totalJobsSeen > 0) {
       backupSuccessRate.add(totalSucceededJobs / totalJobsSeen);
@@ -444,10 +480,11 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
     console.log(
         `Jobs: total=${totalJobsSeen}, ` +
         `succeeded=${totalSucceededJobs}, ` +
-        `failed=${totalFailedJobs}, ` +
+        `failed=${totalFailedJobs} (perm=${totalPermanentlyFailedJobs}), ` +
         `running=${currentRunning}, ` +
         `pods=${cumulativePodCount}, ` +
-        `backedUp=${backedUpCount}/${backupStatusMap.size}`
+        `backedUp=${backedUpCount}/${backupStatusMap.size}, ` +
+        `jobs/ws=${avgJobsPerWorkspace.toFixed(2)} (max=${maxJobsForAnyWorkspace})`
     );
 
     // ----------------------------------------
@@ -648,6 +685,22 @@ function collectFinalMetrics() {
 
   const totalJobsSeen = seenJobUids.size;
 
+  // Calculate jobs per workspace metrics
+  let totalWorkspacesWithJobs = jobsPerWorkspaceId.size;
+  let maxJobsForAnyWorkspace = 0;
+  let avgJobsPerWorkspace = 0;
+
+  if (totalWorkspacesWithJobs > 0) {
+    let totalJobsAcrossWorkspaces = 0;
+    for (const count of jobsPerWorkspaceId.values()) {
+      totalJobsAcrossWorkspaces += count;
+      if (count > maxJobsForAnyWorkspace) {
+        maxJobsForAnyWorkspace = count;
+      }
+    }
+    avgJobsPerWorkspace = totalJobsAcrossWorkspaces / totalWorkspacesWithJobs;
+  }
+
   console.log("\n======================================");
   console.log("Final Backup Job Metrics");
   console.log("======================================");
@@ -658,6 +711,8 @@ function collectFinalMetrics() {
   console.log(`Running/Pending Jobs: ${runningJobs}`);
   console.log(`Total Pods Created: ${cumulativePodCount}`);
   console.log(`Workspaces Backed Up: ${backedUpCount}/${backupStatusMap.size}`);
+  console.log(`Average Jobs per Workspace: ${avgJobsPerWorkspace.toFixed(2)}`);
+  console.log(`Max Jobs for Any Workspace: ${maxJobsForAnyWorkspace}`);
 
   if (totalJobsSeen > 0) {
     const successRate = ((backedUpCount / backupStatusMap.size) * 100).toFixed(2);
@@ -1020,8 +1075,11 @@ export function handleSummary(data) {
     'backup_jobs_total',
     'backup_jobs_succeeded',
     'backup_jobs_failed',
+    'backup_jobs_permanently_failed',
     'backup_jobs_running',
     'backup_pods_total',
+    'backup_jobs_per_workspace',
+    'backup_max_jobs_per_workspace',
     'workspaces_stopped',
     'workspaces_backed_up',
     'backup_success_rate',
