@@ -1,0 +1,30 @@
+{
+  "description": "Backup/Restore Load Test - OpenShift Internal Registry Only",
+  "tests": [],
+  "custom_tests": [
+    {
+      "name": "backup_250_separate_ns_internal",
+      "args": "--max-devworkspaces 250 --separate-namespaces true --dwoc-config-type openshift-internal --registry-path \"image-registry.openshift-image-registry.svc:5000\" --registry-secret \"\" --backup-wait-minutes 30",
+      "enabled": true,
+      "description": "250 workspaces - Separate namespaces + OpenShift internal registry"
+    },
+    {
+      "name": "backup_500_separate_ns_internal",
+      "args": "--max-devworkspaces 500 --separate-namespaces true --dwoc-config-type openshift-internal --registry-path \"image-registry.openshift-image-registry.svc:5000\" --registry-secret \"\" --backup-wait-minutes 40",
+      "enabled": true,
+      "description": "500 workspaces - Separate namespaces + OpenShift internal registry"
+    },
+    {
+      "name": "backup_1000_separate_ns_internal",
+      "args": "--max-devworkspaces 1000 --separate-namespaces true --dwoc-config-type openshift-internal --registry-path \"image-registry.openshift-image-registry.svc:5000\" --registry-secret \"\" --backup-wait-minutes 50",
+      "enabled": true,
+      "description": "1000 workspaces - Separate namespaces + OpenShift internal registry"
+    },
+    {
+      "name": "backup_1500_separate_ns_internal",
+      "args": "--max-devworkspaces 1500 --separate-namespaces true --dwoc-config-type openshift-internal --registry-path \"image-registry.openshift-image-registry.svc:5000\" --registry-secret \"\" --backup-wait-minutes 60",
+      "enabled": true,
+      "description": "1500 workspaces - Separate namespaces + OpenShift internal registry"
+    }
+  ]
+}
