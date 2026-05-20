@@ -157,7 +157,12 @@ After test completes, automatically parse logs and display results:
 
 ```bash
 # Check which test was run based on output directory
-if ssh "$PERFLAB_USER@$PERFLAB_HOST" "ls -d /home/devworkspace-operator-load-tests/outputs/webhook_run_* 2>/dev/null" | grep -q webhook_run; then
+if ssh "$PERFLAB_USER@$PERFLAB_HOST" "ls -d /home/devworkspace-operator-load-tests/outputs/backup_run_* 2>/dev/null" | grep -q backup_run; then
+  TEST_TYPE="backup"
+  OUTPUT_DIR=$(ssh "$PERFLAB_USER@$PERFLAB_HOST" "ls -td /home/devworkspace-operator-load-tests/outputs/backup_run_* 2>/dev/null | head -1")
+  CSV_FILE="backup_load_test_results.csv"
+  PARSE_SCRIPT="./scripts/parse-backup-outputs.sh"
+elif ssh "$PERFLAB_USER@$PERFLAB_HOST" "ls -d /home/devworkspace-operator-load-tests/outputs/webhook_run_* 2>/dev/null" | grep -q webhook_run; then
   TEST_TYPE="webhook"
   OUTPUT_DIR=$(ssh "$PERFLAB_USER@$PERFLAB_HOST" "ls -td /home/devworkspace-operator-load-tests/outputs/webhook_run_* 2>/dev/null | head -1")
   CSV_FILE="webhook_load_test_results.csv"
