@@ -50,7 +50,7 @@ CSV_FILE="controller_load_test_results.csv"
 
 # Create CSV header if file doesn't exist
 if [[ ! -f "$CSV_FILE" ]]; then
-    echo "Max DWs,Namespace Mode,Duration (min),DWs Created,DWs Ready,Ready Failed,Ready Failed %,Avg CPU (mCPU),Avg Mem (MiB),Create Duration (ms),Ready Duration (ms),CPU Violations,Mem Violations,Avg Etcd CPU (mCPU),Avg Etcd Mem (MiB)" > "$CSV_FILE"
+    echo "DevWorkspaces Created,DevWorkspace Ready,Ready Failed (%),Average CPU (milliCPU),Average Memory (MiB),Create Duration (Avg ms),Ready Duration (Avg ms),CPU Violations,Memory Violations,Average Etcd CPU (milliCPU),Average Etcd Memory (MiB),Namespace" > "$CSV_FILE"
     echo "Created new CSV file: $CSV_FILE"
 else
     echo "Appending to existing CSV file: $CSV_FILE"
@@ -169,9 +169,9 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
 
     # Calculate Ready Failed percentage
     if [[ "$DW_CREATE_COUNT" -gt 0 ]]; then
-        READY_FAILED_PCT=$(awk "BEGIN {printf \"%.2f\", ($DW_READY_FAILED / $DW_CREATE_COUNT) * 100}")
+        READY_FAILED_PCT=$(awk "BEGIN {printf \"%.2f%%\", ($DW_READY_FAILED / $DW_CREATE_COUNT) * 100}")
     else
-        READY_FAILED_PCT="0.00"
+        READY_FAILED_PCT="0.00%"
     fi
 
     # Extract operator metrics (avg values)
@@ -209,7 +209,7 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     fi
 
     # Build CSV row
-    CSV_ROW="$MAX_DWS,$NAMESPACE_MODE,$DURATION,$DW_CREATE_COUNT,$DW_READY_COUNT,$DW_READY_FAILED,$READY_FAILED_PCT,$AVG_OP_CPU,$AVG_OP_MEM,$AVG_CREATE_DUR,$AVG_READY_DUR,$OP_CPU_VIOL,$OP_MEM_VIOL,$AVG_ETCD_CPU,$AVG_ETCD_MEM"
+    CSV_ROW="$DW_CREATE_COUNT,$DW_READY_COUNT,$READY_FAILED_PCT,$AVG_OP_CPU,$AVG_OP_MEM,$AVG_CREATE_DUR,$AVG_READY_DUR,$OP_CPU_VIOL,$OP_MEM_VIOL,$AVG_ETCD_CPU,$AVG_ETCD_MEM,$NAMESPACE_MODE"
 
     # Append to CSV
     echo "$CSV_ROW" >> "$CSV_FILE"
