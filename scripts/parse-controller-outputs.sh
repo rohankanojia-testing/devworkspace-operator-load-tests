@@ -164,7 +164,7 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
 
     # Extract all metrics (with defaults if not found)
     DW_CREATE_COUNT=$(extract_counter "$INPUT" "devworkspace_create_count" || echo "0")
-    DW_READY_COUNT=$(extract_counter_minmax "$INPUT" "devworkspace_ready" || echo "0")
+    DW_READY_COUNT=$(extract_counter "$INPUT" "devworkspace_ready" || echo "0")
     DW_READY_FAILED=$(extract_counter "$INPUT" "devworkspace_ready_failed" || echo "0")
 
     # Calculate Ready Failed percentage
