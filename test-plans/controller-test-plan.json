@@ -30,6 +30,13 @@
       "description": "2500 DevWorkspaces in single namespace"
     },
     {
+      "max_devworkspaces": 1000,
+      "mode": "separate",
+      "duration_minutes": 40,
+      "enabled": false,
+      "description": "1000 DevWorkspaces in separate namespaces"
+    },
+    {
       "max_devworkspaces": 1500,
       "mode": "separate",
       "duration_minutes": 60,
