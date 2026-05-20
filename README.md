@@ -289,6 +289,38 @@ sed -i 's/quay.io\/CHANGEME/quay.io\/yourusername/g' \
 
 **For detailed documentation, see:** [BACKUP_LOAD_TESTING.md](./test-devworkspace-controller-load/BACKUP_LOAD_TESTING.md)
 
+## Running Tests on Remote Performance Lab Clusters
+
+For automated testing on remote performance lab clusters, use the **`run-loadtest` skill** with [Claude Code](https://claude.ai/claude-code):
+
+```bash
+/run-loadtest
+```
+
+**What it automates:**
+1. ✅ Verifies DevWorkspace Operator installation
+2. ✅ Checks DevWorkspaceOperatorConfig settings
+3. ✅ Ensures load test repository is cloned
+4. ✅ Runs test in tmux session (survives SSH disconnects)
+5. ✅ **Monitors progress every 10 minutes automatically**
+6. ✅ **Parses logs to CSV automatically after completion**
+7. ✅ **Displays CSV results ready to copy to Google Sheets**
+
+**Prerequisites:**
+```bash
+export PERFLAB_USER=your-username
+export PERFLAB_HOST=perflab.example.com
+```
+
+**Manual monitoring (optional):**
+```bash
+# Check live output
+ssh -t $PERFLAB_USER@$PERFLAB_HOST "tmux attach-session -t loadtest"
+# Press Ctrl+b then d to detach
+```
+
+See `.skills/run-loadtest/SKILL.md` for complete documentation.
+
 ## Troubleshooting
 
 - **Permission errors**: Ensure your kubeconfig has sufficient RBAC permissions
