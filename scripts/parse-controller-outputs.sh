@@ -60,14 +60,14 @@ fi
 extract_avg() {
     local input="$1"
     local metric_name="$2"
-    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$metric_name" | awk '{
+    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$metric_name" | head -1 | awk '{
         for (i=1; i<=NF; i++) {
             if ($i ~ /^avg=/) {
-                print substr($i, 5)
+                printf "%s", substr($i, 5)
                 exit
             }
         }
-        print "0"
+        printf "0"
     }'
 }
 
@@ -75,14 +75,14 @@ extract_avg() {
 extract_counter() {
     local input="$1"
     local counter_name="$2"
-    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$counter_name" | awk '{
+    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$counter_name" | head -1 | awk '{
         for (i=1; i<=NF; i++) {
             if ($i ~ /^[0-9]+$/ && $(i+1) ~ /^[0-9.]+\/s$/) {
-                print $i
+                printf "%s", $i
                 exit
             }
         }
-        print "0"
+        printf "0"
     }'
 }
 
@@ -90,14 +90,14 @@ extract_counter() {
 extract_counter_minmax() {
     local input="$1"
     local counter_name="$2"
-    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$counter_name" | awk '{
+    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$counter_name" | head -1 | awk '{
         for (i=1; i<=NF; i++) {
             if ($i ~ /^[0-9]+$/ && $(i+1) ~ /^min=/) {
-                print $i
+                printf "%s", $i
                 exit
             }
         }
-        print "0"
+        printf "0"
     }'
 }
 
