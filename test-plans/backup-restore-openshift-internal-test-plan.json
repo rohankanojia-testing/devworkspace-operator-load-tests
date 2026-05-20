@@ -31,6 +31,30 @@
       "args": "--mode binary --max-vus 350 --max-devworkspaces 2500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 70 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"\" --registry-secret \"\" --backup-wait-minutes 80",
       "enabled": true,
       "description": "2500 workspaces - Separate namespaces + OpenShift internal registry"
+    },
+    {
+      "name": "backup_250_separate_ns_internal_incorrect",
+      "args": "--mode binary --max-vus 100 --max-devworkspaces 250 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 20 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"non-existent-registry.openshift-image-registry.svc:9999\" --registry-secret \"\" --backup-wait-minutes 30",
+      "enabled": true,
+      "description": "250 workspaces - Separate namespaces + OpenShift internal registry + Incorrect config (invalid registry)"
+    },
+    {
+      "name": "backup_500_separate_ns_internal_incorrect",
+      "args": "--mode binary --max-vus 150 --max-devworkspaces 500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 30 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"non-existent-registry.openshift-image-registry.svc:9999\" --registry-secret \"\" --backup-wait-minutes 40",
+      "enabled": true,
+      "description": "500 workspaces - Separate namespaces + OpenShift internal registry + Incorrect config (invalid registry)"
+    },
+    {
+      "name": "backup_1000_separate_ns_internal_incorrect",
+      "args": "--mode binary --max-vus 200 --max-devworkspaces 1000 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 40 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"non-existent-registry.openshift-image-registry.svc:9999\" --registry-secret \"\" --backup-wait-minutes 50",
+      "enabled": true,
+      "description": "1000 workspaces - Separate namespaces + OpenShift internal registry + Incorrect config (invalid registry)"
+    },
+    {
+      "name": "backup_1500_separate_ns_internal_incorrect",
+      "args": "--mode binary --max-vus 250 --max-devworkspaces 1500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 50 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"non-existent-registry.openshift-image-registry.svc:9999\" --registry-secret \"\" --backup-wait-minutes 60",
+      "enabled": true,
+      "description": "1500 workspaces - Separate namespaces + OpenShift internal registry + Incorrect config (invalid registry)"
     }
   ]
 }
