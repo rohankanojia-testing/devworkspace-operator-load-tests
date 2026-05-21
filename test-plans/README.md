@@ -290,12 +290,20 @@ Small-scale backup test for **CRC** or other resource-limited OpenShift clusters
 | `backup_30_separate_ns_internal_crc` | 30 | separate | yes |
 | `backup_30_single_ns_internal_crc` | 30 | single | no (lighter fallback) |
 
-**Run via suite runner (recommended):**
+**Run via suite runner on CRC** (auto-skips `provision-pvs.sh`; uses CRC dynamic StorageClass):
 
 ```bash
 # Logged into CRC (oc login). Optional: faster backup cron during test
 export BACKUP_SCHEDULE="*/2 * * * *"
 
+./scripts/run_all_backup_loadtests.sh \
+  test-plans/backup-restore-crc-openshift-internal-test-plan.json
+```
+
+**Force static hostpath PVs on CRC** (respects explicit env; only if you use `provision-pvs.sh`):
+
+```bash
+export PROVISION_PVS=true   # set before the script — always honored on CRC
 ./scripts/run_all_backup_loadtests.sh \
   test-plans/backup-restore-crc-openshift-internal-test-plan.json
 ```

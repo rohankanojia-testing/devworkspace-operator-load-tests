@@ -17,6 +17,7 @@
 #   OUTPUT_DIR                - Base directory for outputs (default: outputs/)
 #   SKIP_CLEANUP              - Skip cleanup steps (default: false)
 #   RESTART_OPERATOR          - Restart DWO operator after cleanup (default: true)
+#   PROVISION_PVS             - Run provision-pvs.sh before tests (default: true; auto false on CRC)
 #   TEST_TIMEOUT              - Max time per test in seconds (default: 18000 = 5h)
 #   CLEANUP_MAX_WAIT          - Max time for cleanup in seconds (default: 7200 = 2h)
 #
@@ -52,7 +53,6 @@ CLEANUP_MAX_WAIT=7200   # 2 hours for cleanup
 TEST_TIMEOUT=18000      # 5 hours per test (backup tests take longer)
 SKIP_CLEANUP="${SKIP_CLEANUP:-false}"
 RESTART_OPERATOR="${RESTART_OPERATOR:-true}"
-PROVISION_PVS="${PROVISION_PVS:-true}"  # Provision PVs before tests
 
 # Test plan file (required)
 TEST_PLAN_FILE="${1:-}"
@@ -86,6 +86,49 @@ fi
 if ! jq empty "$TEST_PLAN_FILE" 2>/dev/null; then
     echo "ERROR: Invalid JSON in test plan file: $TEST_PLAN_FILE"
     exit 1
+fi
+
+########################################
+# CRC DETECTION & PV PROVISIONING DEFAULT
+########################################
+is_crc_cluster() {
+    local console_url
+    console_url=$(kubectl get console cluster -o jsonpath='{.status.consoleURL}' 2>/dev/null || echo "")
+
+    if [[ "${console_url}" == *"crc.testing"* ]] || [[ "${console_url}" == *"apps-crc"* ]]; then
+        return 0
+    fi
+
+    local cluster_domain
+    cluster_domain=$(kubectl get ingress.config.openshift.io cluster -o jsonpath='{.spec.domain}' 2>/dev/null || echo "")
+
+    if [[ "${cluster_domain}" == *"crc.testing"* ]] || [[ "${cluster_domain}" == *"apps-crc"* ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Respect PROVISION_PVS when already exported (e.g. PROVISION_PVS=true|false).
+# Only apply defaults when the variable was not set before this script runs.
+if [ -n "${PROVISION_PVS+x}" ]; then
+    PROVISION_PVS_USER_SET=true
+else
+    PROVISION_PVS_USER_SET=false
+fi
+
+if is_crc_cluster; then
+    if [ "$PROVISION_PVS_USER_SET" == "true" ]; then
+        PROVISION_PVS_AUTO_DISABLED=false
+    else
+        PROVISION_PVS=false
+        PROVISION_PVS_AUTO_DISABLED=true
+    fi
+else
+    if [ "$PROVISION_PVS_USER_SET" != "true" ]; then
+        PROVISION_PVS=true
+    fi
+    PROVISION_PVS_AUTO_DISABLED=false
 fi
 
 # Colors for output
@@ -153,6 +196,12 @@ echo "Output directory: $RUN_DIR"
 echo "Logs directory: $LOG_DIR"
 echo "Skip cleanup: $SKIP_CLEANUP"
 echo "Restart operator: $RESTART_OPERATOR"
+echo "Provision PVs: $PROVISION_PVS"
+if [ "$PROVISION_PVS_USER_SET" == "true" ]; then
+    echo "  (PROVISION_PVS set in environment — CRC/default auto logic not applied)"
+elif [ "${PROVISION_PVS_AUTO_DISABLED:-false}" == "true" ]; then
+    echo "  (CRC detected — using cluster dynamic storage; set PROVISION_PVS=true to force static PVs)"
+fi
 echo "Test timeout: ${TEST_TIMEOUT}s"
 echo "Cleanup timeout: ${CLEANUP_MAX_WAIT}s"
 echo "--------------------------------------------------------"
@@ -681,17 +730,21 @@ echo "$(date)" > "$RUN_DIR/test_suite.log"
 load_test_plan_from_json
 show_test_plan
 
-# Provision PVs if enabled
+# Provision PVs if enabled (count derived from enabled tests in the plan)
 if [ "$PROVISION_PVS" == "true" ]; then
     echo ""
     delete_old_pvs
 
     echo ""
-    # Always provision 3000 PVs regardless of test plan
-    # This ensures sufficient PVs are available for large-scale tests
-    FIXED_PV_COUNT=3000
-    echo -e "${BLUE}Pre-allocating ${FIXED_PV_COUNT} PVs for backup tests${NC}"
-    provision_pvs_for_test "$FIXED_PV_COUNT"
+    PV_COUNT=$(get_max_workspaces_from_plan)
+    if [ "$PV_COUNT" -eq 0 ]; then
+        echo -e "${YELLOW}No enabled tests with --max-devworkspaces in plan; skipping PV provisioning${NC}"
+    else
+        # 10% headroom (matches provision-pvs.sh)
+        PV_COUNT=$(( PV_COUNT + (PV_COUNT / 10) ))
+        echo -e "${BLUE}Pre-allocating ${PV_COUNT} PVs from test plan (max workspaces + 10%)${NC}"
+        provision_pvs_for_test "$PV_COUNT"
+    fi
 else
     echo ""
     echo -e "${YELLOW}PV provisioning is disabled (PROVISION_PVS=$PROVISION_PVS)${NC}"

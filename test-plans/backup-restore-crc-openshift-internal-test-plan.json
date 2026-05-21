@@ -1,5 +1,5 @@
 {
-  "description": "CRC / small OpenShift cluster — OpenShift internal registry backup (30 workspaces). Exercises ImageStreamTag-based backup detection (openshift-internal only). Requires DevWorkspace Operator, ~30+ GiB free cluster storage, and oc/kubectl logged into CRC.",
+  "description": "CRC / small OpenShift cluster — OpenShift internal registry backup (30 workspaces). openshift-internal with ImageStreamTag metrics. run_all_backup_loadtests.sh auto-skips provision-pvs.sh on CRC (dynamic storage). Override: PROVISION_PVS=true",
   "tests": [],
   "custom_tests": [
     {
