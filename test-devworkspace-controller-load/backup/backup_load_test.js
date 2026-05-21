@@ -39,6 +39,10 @@ const dwocConfigType = __ENV.DWOC_CONFIG_TYPE || 'correct';
 const verifyRestore = __ENV.VERIFY_RESTORE !== 'false'; // Default to true, can be disabled with VERIFY_RESTORE=false
 const maxRestoreSamples = Number(__ENV.MAX_RESTORE_SAMPLES || 10); // Maximum number of workspaces to restore for verification// Cron schedule for backup jobs (e.g., "*/10 * * * *")
 const backupJobLabel = "controller.devfile.io/backup-job=true";
+// ImageStreamTag-based backup success detection applies ONLY to openshift-internal.
+// External registry modes (correct/incorrect) use ephemeral Job status — see else branch in Step 3.
+const BACKUP_IMAGE_STREAM_TAG = 'latest';
+const useImageStreamTagBackup = dwocConfigType === 'openshift-internal';
 let ETCD_NAMESPACE = 'openshift-etcd';
 let ETCD_POD_NAME_PATTERN = 'etcd';
 const ETCD_POD_SELECTOR = `app=${ETCD_POD_NAME_PATTERN}`;
@@ -69,13 +73,19 @@ export const options = {
     },
   },
   thresholds: {
-    'backup_jobs_total': ['value>0'],
-    'backup_jobs_succeeded': dwocConfigType === 'incorrect' ? [] : ['value>0'],
+    // openshift-internal: backup success is measured via ImageStreamTags, not ephemeral Jobs
+    'backup_jobs_total': useImageStreamTagBackup ? [] : ['value>0'],
+    'backup_jobs_succeeded': useImageStreamTagBackup || dwocConfigType === 'incorrect' ? [] : ['value>0'],
     'backup_jobs_failed': dwocConfigType === 'incorrect' ? ['value>0'] : ['value==0'],
-    'backup_pods_total': ['value>0'],
+    'backup_pods_total': useImageStreamTagBackup ? [] : ['value>0'],
     'workspaces_stopped': ['count>0'],
     'workspaces_backed_up': dwocConfigType === 'incorrect' ? [] : ['count>0'],
     'backup_success_rate': dwocConfigType === 'incorrect' ? [] : ['value>=0.95'],
+    'imagestreamtags_backed_up': useImageStreamTagBackup ? ['value>0'] : [],
+    'imagestreamtags_total': useImageStreamTagBackup ? ['value>0'] : [],
+    'imagestreamtag_success_rate': useImageStreamTagBackup ? ['value>=0.95'] : [],
+    'imagestreams_created': useImageStreamTagBackup ? ['count>0'] : [],
+    'imagestreams_expected': useImageStreamTagBackup ? ['count>0'] : [],
     // Restore thresholds only apply for correct/openshift-internal modes
     'restore_workspaces_total': dwocConfigType === 'incorrect' || !verifyRestore ? [] : ['count>0'],
     'restore_workspaces_succeeded': dwocConfigType === 'incorrect' || !verifyRestore ? [] : ['count>0'],
@@ -100,6 +110,11 @@ const backupSuccessRate = new Gauge('backup_success_rate');
 const backupJobDuration = new Trend('backup_job_duration');
 const backupJobsPerWorkspace = new Gauge('backup_jobs_per_workspace');  // Average jobs per workspace
 const backupMaxJobsPerWorkspace = new Gauge('backup_max_jobs_per_workspace');  // Max jobs for any single workspace
+// openshift-internal only: live + final summary metrics for backup ImageStreamTags
+const imageStreamTagsBackedUp = new Gauge('imagestreamtags_backed_up');
+const imageStreamTagsTotal = new Gauge('imagestreamtags_total');
+const imageStreamTagSuccessRate = new Gauge('imagestreamtag_success_rate');
+// Legacy counter names kept for CSV/log parsers (values = ImageStreamTag counts)
 const imageStreamsCreated = new Counter('imagestreams_created');
 const imageStreamsExpected = new Counter('imagestreams_expected');
 const operatorCpu = new Trend('average_operator_cpu');
@@ -207,20 +222,27 @@ function stopWorkspacesAndMonitorBackups(data) {
   console.log("Waiting 30 seconds for workspaces to stop...");
   sleep(30);
 
-  // Step 3: Wait for backup jobs to be created for all stopped workspaces
-  console.log("\nStep 3: Waiting for backup Jobs to be created...");
-  console.log(`Expecting backup jobs for ${stoppedCount} stopped workspaces`);
-  const jobsCreated = waitForAllBackupJobsCreation(stoppedCount, 30, 10);
-  if (!jobsCreated) {
-    console.warn(`⚠️  Not all backup jobs were created within timeout`);
-    console.warn("Continuing to monitor anyway...\n");
+  if (useImageStreamTagBackup) {
+    // Step 3: Monitor until each workspace has a backup ImageStreamTag (durable signal)
+    console.log("\nStep 3: Monitoring backup completion via ImageStreamTags...");
+    console.log(`Expecting ImageStreamTag "${BACKUP_IMAGE_STREAM_TAG}" in each workspace namespace`);
+    monitorBackupCompletionWithImageStreamTags(backupMonitorDurationMinutes, 10);
   } else {
-    console.log(`✅ All ${stoppedCount} backup jobs have been created\n`);
-  }
+    // External registry (correct/incorrect): Job creation + Job success drive backed_up
+    console.log("\nStep 3: Waiting for backup Jobs to be created...");
+    console.log(`Expecting backup jobs for ${stoppedCount} stopped workspaces`);
+    const jobsCreated = waitForAllBackupJobsCreation(stoppedCount, 30, 10);
+    if (!jobsCreated) {
+      console.warn(`⚠️  Not all backup jobs were created within timeout`);
+      console.warn("Continuing to monitor anyway...\n");
+    } else {
+      console.log(`✅ All ${stoppedCount} backup jobs have been created\n`);
+    }
 
-  // Step 4: Monitor backup jobs and operator/etcd metrics
-  console.log("\nStep 4: Monitoring backup Jobs and system metrics...");
-  monitorBackupJobsAndMetrics(backupMonitorDurationMinutes);
+    // Step 4: Monitor backup jobs and operator/etcd metrics
+    console.log("\nStep 4: Monitoring backup Jobs and system metrics...");
+    monitorBackupJobsAndMetrics(backupMonitorDurationMinutes);
+  }
 
   // Step 5: Verify all workspaces were backed up
   console.log("\nStep 5: Verifying backup coverage...");
@@ -333,180 +355,367 @@ function getBackupJobs() {
   return data.items || [];
 }
 
+function assertOpenShiftInternalBackupMode(caller) {
+  if (!useImageStreamTagBackup) {
+    throw new Error(`${caller} is only valid when DWOC_CONFIG_TYPE=openshift-internal (current: ${dwocConfigType})`);
+  }
+}
+
+function getImageStreamTags(namespace) {
+  assertOpenShiftInternalBackupMode('getImageStreamTags');
+  const url = useSeparateNamespaces
+    ? `${apiServer}/apis/image.openshift.io/v1/imagestreamtags`
+    : `${apiServer}/apis/image.openshift.io/v1/namespaces/${namespace}/imagestreamtags`;
+
+  const res = http.get(url, {headers});
+
+  if (res.status !== 200) {
+    console.warn(`Failed to get ImageStreamTags: ${res.status}`);
+    return [];
+  }
+
+  const data = JSON.parse(res.body);
+  return data.items || [];
+}
+
+function imageStreamTagHasImage(imageStreamTag) {
+  if (imageStreamTag.image) {
+    return true;
+  }
+  if (imageStreamTag.tag?.items?.length > 0) {
+    return true;
+  }
+  if (imageStreamTag.status?.image) {
+    return true;
+  }
+  return false;
+}
+
+function workspaceMatchesBackupImageStream(streamName, dwName, dwId) {
+  return streamName === dwName
+    || streamName === dwId
+    || (dwName && streamName.includes(dwName))
+    || (dwId && streamName.includes(dwId));
+}
+
+function findBackupImageStreamTag(dwName, dwId, namespace, imageStreamTags) {
+  for (const tag of imageStreamTags) {
+    if (tag.metadata?.namespace !== namespace) {
+      continue;
+    }
+
+    const fullName = tag.metadata?.name || '';
+    const colonIndex = fullName.lastIndexOf(':');
+    if (colonIndex === -1) {
+      continue;
+    }
+
+    const streamName = fullName.substring(0, colonIndex);
+    const tagName = fullName.substring(colonIndex + 1);
+
+    if (tagName !== BACKUP_IMAGE_STREAM_TAG) {
+      continue;
+    }
+
+    if (!workspaceMatchesBackupImageStream(streamName, dwName, dwId)) {
+      continue;
+    }
+
+    if (imageStreamTagHasImage(tag)) {
+      return tag;
+    }
+  }
+
+  return null;
+}
+
+function buildImageStreamTagsByNamespace() {
+  const tagsByNamespace = new Map();
+
+  if (useSeparateNamespaces) {
+    const allTags = getImageStreamTags();
+    for (const tag of allTags) {
+      const namespace = tag.metadata?.namespace;
+      if (!namespace) {
+        continue;
+      }
+      if (!tagsByNamespace.has(namespace)) {
+        tagsByNamespace.set(namespace, []);
+      }
+      tagsByNamespace.get(namespace).push(tag);
+    }
+    return tagsByNamespace;
+  }
+
+  tagsByNamespace.set(loadTestNamespace, getImageStreamTags(loadTestNamespace));
+  return tagsByNamespace;
+}
+
+function countBackedUpWorkspaces() {
+  let backedUpCount = 0;
+  for (const [, info] of backupStatusMap) {
+    if (info.backed_up) {
+      backedUpCount++;
+    }
+  }
+  return backedUpCount;
+}
+
+function updateBackedUpFromImageStreamTags() {
+  const tagsByNamespace = buildImageStreamTagsByNamespace();
+  let newlyMarked = 0;
+
+  for (const [dwName, statusInfo] of backupStatusMap) {
+    if (statusInfo.backed_up) {
+      continue;
+    }
+
+    const namespaceTags = tagsByNamespace.get(statusInfo.namespace) || [];
+    const backupTag = findBackupImageStreamTag(
+      dwName,
+      statusInfo.workspaceId,
+      statusInfo.namespace,
+      namespaceTags,
+    );
+
+    if (backupTag) {
+      statusInfo.backed_up = true;
+      backupStatusMap.set(dwName, statusInfo);
+      newlyMarked++;
+    }
+  }
+
+  return newlyMarked;
+}
+
+function listUnbackedWorkspaces() {
+  for (const [name, info] of backupStatusMap) {
+    if (!info.backed_up) {
+      console.warn(`  Not backed up: ${info.namespace}/${name} (ID: ${info.workspaceId || 'unknown'})`);
+    }
+  }
+}
+
+function updateImageStreamTagMetrics(backedUpCount, totalCount) {
+  if (!useImageStreamTagBackup) {
+    return;
+  }
+
+  imageStreamTagsBackedUp.add(backedUpCount);
+  imageStreamTagsTotal.add(totalCount);
+
+  if (totalCount > 0) {
+    imageStreamTagSuccessRate.add(backedUpCount / totalCount);
+  }
+}
+
+function monitorBackupCompletionWithImageStreamTags(maxWaitMinutes, pollIntervalSeconds) {
+  assertOpenShiftInternalBackupMode('monitorBackupCompletionWithImageStreamTags');
+  const maxAttempts = (maxWaitMinutes * 60) / pollIntervalSeconds;
+  let attempts = 0;
+  const startTime = Date.now();
+  const monitorStartTime = Date.now();
+
+  console.log(`Waiting for ${backupStatusMap.size} backup ImageStreamTags (max ${maxWaitMinutes} minutes)...\n`);
+
+  while (attempts < maxAttempts) {
+    const newlyMarked = updateBackedUpFromImageStreamTags();
+    const backedUpCount = countBackedUpWorkspaces();
+    const jobs = getBackupJobs();
+
+    updateBackupJobMetrics(jobs, backedUpCount);
+    updateImageStreamTagMetrics(backedUpCount, backupStatusMap.size);
+
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const progress = ((backedUpCount / backupStatusMap.size) * 100).toFixed(1);
+
+    if (attempts % 10 === 0 || newlyMarked > 0) {
+      console.log(`  [${elapsed}s] ImageStreamTags: ${backedUpCount}/${backupStatusMap.size} (${progress}%)`);
+    }
+
+    if (backedUpCount === backupStatusMap.size) {
+      console.log(`\n✅ All ${backupStatusMap.size} workspaces backed up via ImageStreamTag:${BACKUP_IMAGE_STREAM_TAG}`);
+      break;
+    }
+
+    const secondsElapsed = Math.floor((Date.now() - monitorStartTime) / 1000);
+    if (secondsElapsed % 5 === 0) {
+      checkOperatorMetrics();
+      checkSystemEtcdMetrics();
+    }
+
+    sleep(pollIntervalSeconds);
+    attempts++;
+  }
+
+  const finalBackedUp = countBackedUpWorkspaces();
+  if (finalBackedUp < backupStatusMap.size) {
+    const totalWaitTime = maxWaitMinutes * 60;
+    console.warn(`\n⚠️  Timeout after ${totalWaitTime}s: only ${finalBackedUp}/${backupStatusMap.size} workspaces have backup ImageStreamTags`);
+    listUnbackedWorkspaces();
+  }
+
+  console.log("\n📊 Monitoring finished");
+}
+
+function updateBackupJobMetrics(jobs, backedUpCount) {
+  let currentRunning = 0;
+
+  for (const job of jobs) {
+    const jobUid = job.metadata?.uid;
+    if (!jobUid) {
+      continue;
+    }
+
+    const status = job.status || {};
+    const conditions = status.conditions || [];
+    const labels = job.metadata?.labels || {};
+    const workspaceId = labels['controller.devfile.io/devworkspace_id'];
+
+    if (!seenJobUids.has(jobUid)) {
+      seenJobUids.add(jobUid);
+      if (workspaceId) {
+        const currentCount = jobsPerWorkspaceId.get(workspaceId) || 0;
+        jobsPerWorkspaceId.set(workspaceId, currentCount + 1);
+      }
+    }
+
+    const activePods = status.active || 0;
+    const succeededPods = status.succeeded || 0;
+    const failedPods = status.failed || 0;
+    const jobPodCount = activePods + succeededPods + failedPods;
+
+    const previousMaxPods = totalPodsCreated.get(jobUid) || 0;
+    if (jobPodCount > previousMaxPods) {
+      totalPodsCreated.set(jobUid, jobPodCount);
+    }
+
+    if (conditions.some && conditions.some(c => c.type === 'Failed' && c.status === 'True')) {
+      if (!permanentlyFailedJobUids.has(jobUid)) {
+        permanentlyFailedJobUids.add(jobUid);
+      }
+    } else if (status.succeeded !== 1 && (status.active || 0) > 0) {
+      currentRunning++;
+    }
+  }
+
+  const totalJobsSeen = seenJobUids.size;
+  const totalPermanentlyFailedJobs = permanentlyFailedJobUids.size;
+  const totalSucceededJobs = useImageStreamTagBackup ? backedUpCount : countJobSucceededBackups(jobs);
+  const totalFailedJobs = totalJobsSeen - totalSucceededJobs - currentRunning;
+
+  let cumulativePodCount = 0;
+  for (const count of totalPodsCreated.values()) {
+    cumulativePodCount += count;
+  }
+
+  let maxJobsForAnyWorkspace = 0;
+  let avgJobsPerWorkspace = 0;
+  const totalWorkspacesWithJobs = jobsPerWorkspaceId.size;
+
+  if (totalWorkspacesWithJobs > 0) {
+    let totalJobsAcrossWorkspaces = 0;
+    for (const count of jobsPerWorkspaceId.values()) {
+      totalJobsAcrossWorkspaces += count;
+      if (count > maxJobsForAnyWorkspace) {
+        maxJobsForAnyWorkspace = count;
+      }
+    }
+    avgJobsPerWorkspace = totalJobsAcrossWorkspaces / totalWorkspacesWithJobs;
+  }
+
+  backupJobsTotal.add(totalJobsSeen);
+  backupJobsSucceeded.add(totalSucceededJobs);
+  backupJobsFailed.add(totalFailedJobs);
+  backupJobsPermanentlyFailed.add(totalPermanentlyFailedJobs);
+  backupJobsRunning.add(currentRunning);
+  backupPodsTotal.add(cumulativePodCount);
+  backupJobsPerWorkspace.add(avgJobsPerWorkspace);
+  backupMaxJobsPerWorkspace.add(maxJobsForAnyWorkspace);
+
+  if (useImageStreamTagBackup && backupStatusMap.size > 0) {
+    backupSuccessRate.add(backedUpCount / backupStatusMap.size);
+  } else if (totalJobsSeen > 0) {
+    backupSuccessRate.add(totalSucceededJobs / totalJobsSeen);
+  }
+
+  console.log(
+    `Jobs: total=${totalJobsSeen}, ` +
+    `succeeded=${totalSucceededJobs}, ` +
+    `failed=${totalFailedJobs} (perm=${totalPermanentlyFailedJobs}), ` +
+    `running=${currentRunning}, ` +
+    `pods=${cumulativePodCount}, ` +
+    `backedUp=${backedUpCount}/${backupStatusMap.size}, ` +
+    `jobs/ws=${avgJobsPerWorkspace.toFixed(2)} (max=${maxJobsForAnyWorkspace})`,
+  );
+}
+
+function countJobSucceededBackups(jobs) {
+  let succeeded = 0;
+  for (const job of jobs) {
+    if (job.status?.succeeded === 1) {
+      succeeded++;
+    }
+  }
+  return succeeded;
+}
+
+function markWorkspacesBackedUpFromJobs(jobs) {
+  for (const job of jobs) {
+    if (job.status?.succeeded !== 1) {
+      continue;
+    }
+
+    const workspaceId = job.metadata?.labels?.['controller.devfile.io/devworkspace_id'];
+    if (!workspaceId || !workspaceIdToNameMap.has(workspaceId)) {
+      continue;
+    }
+
+    const dwName = workspaceIdToNameMap.get(workspaceId);
+    const statusInfo = backupStatusMap.get(dwName);
+
+    if (statusInfo && !statusInfo.backed_up) {
+      statusInfo.backed_up = true;
+      backupStatusMap.set(dwName, statusInfo);
+      console.log(`  ✅ Backup completed for: ${statusInfo.namespace}/${dwName}`);
+    }
+  }
+}
 
 function monitorBackupJobsAndMetrics(durationMinutes) {
   const endTime = Date.now() + (durationMinutes * 60 * 1000);
   const pollInterval = 1; // Poll every 1 second as requested
+  const monitorStartTime = Date.now();
 
   console.log("\nMonitoring backup jobs (map-based tracking)...\n");
   console.log(`Tracking ${backupStatusMap.size} workspaces for backup completion\n`);
 
-  let totalJobsSeen = 0;
-  let totalSucceededJobs = 0;
-  let totalFailedJobs = 0;
-
   while (Date.now() < endTime) {
-    // ----------------------------------------
-    // 1. Poll jobs and pods
-    // ----------------------------------------
     const jobs = getBackupJobs();
-    let currentRunning = 0;
+    markWorkspacesBackedUpFromJobs(jobs);
+    const backedUpCount = countBackedUpWorkspaces();
+    updateBackupJobMetrics(jobs, backedUpCount);
 
-    // ----------------------------------------
-    // 2. Parse job status and update backup map
-    // ----------------------------------------
-    for (const job of jobs) {
-      const jobUid = job.metadata?.uid;
-      if (!jobUid) continue;
-
-      const status = job.status || {};
-      const conditions = status.conditions || [];
-      const labels = job.metadata?.labels || {};
-      const workspaceId = labels['controller.devfile.io/devworkspace_id'];
-
-      // Track new jobs
-      if (!seenJobUids.has(jobUid)) {
-        seenJobUids.add(jobUid);
-        totalJobsSeen++;
-
-        // Track jobs per workspace
-        if (workspaceId) {
-          const currentCount = jobsPerWorkspaceId.get(workspaceId) || 0;
-          jobsPerWorkspaceId.set(workspaceId, currentCount + 1);
-        }
-      }
-
-      // Track pod counts
-      const activePods = status.active || 0;
-      const succeededPods = status.succeeded || 0;
-      const failedPods = status.failed || 0;
-      const jobPodCount = activePods + succeededPods + failedPods;
-
-      const previousMaxPods = totalPodsCreated.get(jobUid) || 0;
-      if (jobPodCount > previousMaxPods) {
-        totalPodsCreated.set(jobUid, jobPodCount);
-      }
-
-      // Check if job succeeded
-      if (status.succeeded === 1) {
-        // Find devworkspace name from workspace ID
-        if (workspaceId && workspaceIdToNameMap.has(workspaceId)) {
-          const dwName = workspaceIdToNameMap.get(workspaceId);
-          const statusInfo = backupStatusMap.get(dwName);
-
-          // Update map if not already marked as backed up
-          if (statusInfo && !statusInfo.backed_up) {
-            statusInfo.backed_up = true;
-            backupStatusMap.set(dwName, statusInfo);
-            console.log(`  ✅ Backup completed for: ${statusInfo.namespace}/${dwName}`);
-          }
-        }
-      }
-      // Check if job permanently failed
-      else if (conditions.some && conditions.some(c => c.type === 'Failed' && c.status === 'True')) {
-        // Track permanently failed jobs
-        if (!permanentlyFailedJobUids.has(jobUid)) {
-          permanentlyFailedJobUids.add(jobUid);
-        }
-
-        // Count as failed
-        if (workspaceId && workspaceIdToNameMap.has(workspaceId)) {
-          const dwName = workspaceIdToNameMap.get(workspaceId);
-          console.warn(`  ❌ Backup job failed for: ${dwName} (workspace ID: ${workspaceId})`);
-        }
-      }
-      // Still running
-      else {
-        currentRunning++;
-      }
-    }
-
-    // ----------------------------------------
-    // 3. Calculate metrics
-    // ----------------------------------------
-    let backedUpCount = 0;
-    for (const [name, info] of backupStatusMap) {
-      if (info.backed_up) {
-        backedUpCount++;
-      }
-    }
-
-    // Count succeeded and failed jobs
-    totalSucceededJobs = backedUpCount;
-    totalFailedJobs = totalJobsSeen - totalSucceededJobs - currentRunning;
-    const totalPermanentlyFailedJobs = permanentlyFailedJobUids.size;
-
-    // Calculate total pods
-    let cumulativePodCount = 0;
-    for (const count of totalPodsCreated.values()) {
-      cumulativePodCount += count;
-    }
-
-    // Calculate jobs per workspace metrics
-    let totalWorkspacesWithJobs = jobsPerWorkspaceId.size;
-    let maxJobsForAnyWorkspace = 0;
-    let avgJobsPerWorkspace = 0;
-
-    if (totalWorkspacesWithJobs > 0) {
-      let totalJobsAcrossWorkspaces = 0;
-      for (const count of jobsPerWorkspaceId.values()) {
-        totalJobsAcrossWorkspaces += count;
-        if (count > maxJobsForAnyWorkspace) {
-          maxJobsForAnyWorkspace = count;
-        }
-      }
-      avgJobsPerWorkspace = totalJobsAcrossWorkspaces / totalWorkspacesWithJobs;
-    }
-
-    // ----------------------------------------
-    // 4. Update metrics
-    // ----------------------------------------
-    backupJobsTotal.add(totalJobsSeen);
-    backupJobsSucceeded.add(totalSucceededJobs);
-    backupJobsFailed.add(totalFailedJobs);  // Legacy metric
-    backupJobsPermanentlyFailed.add(totalPermanentlyFailedJobs);  // More accurate
-    backupJobsRunning.add(currentRunning);
-    backupPodsTotal.add(cumulativePodCount);
-    backupJobsPerWorkspace.add(avgJobsPerWorkspace);
-    backupMaxJobsPerWorkspace.add(maxJobsForAnyWorkspace);
-
-    if (totalJobsSeen > 0) {
-      backupSuccessRate.add(totalSucceededJobs / totalJobsSeen);
-    }
-
-    // ----------------------------------------
-    // 5. Logging
-    // ----------------------------------------
-    console.log(
-        `Jobs: total=${totalJobsSeen}, ` +
-        `succeeded=${totalSucceededJobs}, ` +
-        `failed=${totalFailedJobs} (perm=${totalPermanentlyFailedJobs}), ` +
-        `running=${currentRunning}, ` +
-        `pods=${cumulativePodCount}, ` +
-        `backedUp=${backedUpCount}/${backupStatusMap.size}, ` +
-        `jobs/ws=${avgJobsPerWorkspace.toFixed(2)} (max=${maxJobsForAnyWorkspace})`
-    );
-
-    // ----------------------------------------
-    // 6. Termination - stop when all workspaces backed up
-    // ----------------------------------------
     if (backedUpCount === backupStatusMap.size) {
       console.log("\n✅ All workspaces backed up!");
       break;
     }
 
-    // Also stop if all jobs completed (success or failure)
-    if (currentRunning === 0 && totalJobsSeen === backupStatusMap.size) {
+    const currentRunning = jobs.filter(job => {
+      const status = job.status || {};
+      return status.succeeded !== 1
+        && !(status.conditions || []).some(c => c.type === 'Failed' && c.status === 'True')
+        && (status.active || 0) > 0;
+    }).length;
+
+    if (currentRunning === 0 && seenJobUids.size === backupStatusMap.size) {
       if (backedUpCount < backupStatusMap.size) {
         console.warn(`\n⚠️ All jobs completed but only ${backedUpCount}/${backupStatusMap.size} workspaces backed up`);
       }
       break;
     }
 
-    // ----------------------------------------
-    // 7. System checks (every 5 seconds to reduce overhead)
-    // ----------------------------------------
-    const secondsElapsed = Math.floor((Date.now() - (endTime - durationMinutes * 60 * 1000)) / 1000);
+    const secondsElapsed = Math.floor((Date.now() - monitorStartTime) / 1000);
     if (secondsElapsed % 5 === 0) {
       checkOperatorMetrics();
       checkSystemEtcdMetrics();
@@ -516,22 +725,6 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
   }
 
   console.log("\n📊 Monitoring finished");
-}
-
-function getImageStreams(namespace) {
-  const url = useSeparateNamespaces
-    ? `${apiServer}/apis/image.openshift.io/v1/imagestreams`
-    : `${apiServer}/apis/image.openshift.io/v1/namespaces/${namespace}/imagestreams`;
-
-  const res = http.get(url, {headers});
-
-  if (res.status !== 200) {
-    console.warn(`Failed to get ImageStreams: ${res.status}`);
-    return [];
-  }
-
-  const data = JSON.parse(res.body);
-  return data.items || [];
 }
 
 function verifyBackupCoverage(devWorkspaces) {
@@ -571,79 +764,42 @@ function verifyBackupCoverage(devWorkspaces) {
     }
   }
 
-  // Verify ImageStreams for OpenShift internal registry mode
-  if (dwocConfigType === 'openshift-internal') {
-    console.log("\nVerifying ImageStream creation for OpenShift internal registry...");
-    // Create a Set of backed up workspace IDs for ImageStream verification
-    const backedUpWorkspaceIds = new Set();
-    for (const [name, info] of backupStatusMap) {
-      if (info.backed_up && info.workspaceId) {
-        backedUpWorkspaceIds.add(info.workspaceId);
-      }
-    }
-    verifyImageStreams(devWorkspaces, backedUpWorkspaceIds);
+  if (useImageStreamTagBackup) {
+    verifyBackupImageStreamTags(devWorkspaces);
   }
 
   return backedUpWorkspaces;
 }
 
-function verifyImageStreams(devWorkspaces, backedUpWorkspaceIds) {
-  const imageStreamsByNamespace = new Map();
+function verifyBackupImageStreamTags(devWorkspaces) {
+  assertOpenShiftInternalBackupMode('verifyBackupImageStreamTags');
+  console.log("\nVerifying backup ImageStreamTags for OpenShift internal registry...");
+  const tagsByNamespace = buildImageStreamTagsByNamespace();
 
-  // Get ImageStreams from all relevant namespaces
-  if (useSeparateNamespaces) {
-    // Collect ImageStreams from all workspace namespaces
-    for (const dw of devWorkspaces) {
-      const namespace = dw.metadata.namespace;
-      if (!imageStreamsByNamespace.has(namespace)) {
-        const imageStreams = getImageStreams(namespace);
-        imageStreamsByNamespace.set(namespace, imageStreams);
-      }
-    }
-  } else {
-    // Single namespace mode
-    const imageStreams = getImageStreams(loadTestNamespace);
-    imageStreamsByNamespace.set(loadTestNamespace, imageStreams);
-  }
-
-  // Verify each backed-up workspace has a corresponding ImageStream
-  let imageStreamCount = 0;
-  let expectedImageStreams = 0;
+  let imageStreamTagCount = 0;
 
   for (const dw of devWorkspaces) {
-    const dwId = dw.status && dw.status['devworkspaceId'];
-
-    // Only check ImageStreams for successfully backed up workspaces
-    if (!dwId || !backedUpWorkspaceIds.has(dwId)) {
-      continue;
-    }
-
-    expectedImageStreams++;
-    const namespace = dw.metadata.namespace;
     const dwName = dw.metadata.name;
-    const imageStreams = imageStreamsByNamespace.get(namespace) || [];
+    const dwId = dw.status && dw.status['devworkspaceId'];
+    const namespace = dw.metadata.namespace;
+    const namespaceTags = tagsByNamespace.get(namespace) || [];
+    const backupTag = findBackupImageStreamTag(dwName, dwId, namespace, namespaceTags);
 
-    // Look for ImageStream matching the DevWorkspace
-    // ImageStream name typically matches the DevWorkspace name or ID
-    const matchingIS = imageStreams.find(is => {
-      const isName = is.metadata.name;
-      return isName === dwName || isName === dwId || isName.includes(dwName) || isName.includes(dwId);
-    });
-
-    if (matchingIS) {
-      imageStreamCount++;
+    if (backupTag) {
+      imageStreamTagCount++;
     } else {
-      console.warn(`  ⚠️  No ImageStream found for ${namespace}/${dwName} (ID: ${dwId})`);
+      console.warn(`  ⚠️  No backup ImageStreamTag found for ${namespace}/${dwName} (ID: ${dwId || 'unknown'})`);
     }
   }
 
-  imageStreamsCreated.add(imageStreamCount);
-  imageStreamsExpected.add(expectedImageStreams);
+  imageStreamsCreated.add(imageStreamTagCount);
+  imageStreamsExpected.add(devWorkspaces.length);
+  updateImageStreamTagMetrics(imageStreamTagCount, devWorkspaces.length);
 
-  console.log(`\nImageStream Coverage: ${imageStreamCount}/${expectedImageStreams} ImageStreams created`);
+  console.log(`\nImageStreamTag Coverage: ${imageStreamTagCount}/${devWorkspaces.length} (tag: ${BACKUP_IMAGE_STREAM_TAG})`);
 
-  if (imageStreamCount < expectedImageStreams) {
-    console.warn(`Warning: ${expectedImageStreams - imageStreamCount} ImageStreams are missing`);
+  if (imageStreamTagCount < devWorkspaces.length) {
+    console.warn(`Warning: ${devWorkspaces.length - imageStreamTagCount} backup ImageStreamTags are missing`);
   }
 }
 
@@ -657,6 +813,10 @@ function collectFinalMetrics() {
     if (info.backed_up) {
       backedUpCount++;
     }
+  }
+
+  if (useImageStreamTagBackup) {
+    updateImageStreamTagMetrics(backedUpCount, backupStatusMap.size);
   }
 
   // Calculate job stats
@@ -714,9 +874,13 @@ function collectFinalMetrics() {
   console.log(`Average Jobs per Workspace: ${avgJobsPerWorkspace.toFixed(2)}`);
   console.log(`Max Jobs for Any Workspace: ${maxJobsForAnyWorkspace}`);
 
-  if (totalJobsSeen > 0) {
+  if (backupStatusMap.size > 0) {
     const successRate = ((backedUpCount / backupStatusMap.size) * 100).toFixed(2);
     console.log(`Backup Success Rate: ${successRate}%`);
+    if (useImageStreamTagBackup) {
+      backupSuccessRate.add(backedUpCount / backupStatusMap.size);
+      console.log(`ImageStreamTags (${BACKUP_IMAGE_STREAM_TAG}): ${backedUpCount}/${backupStatusMap.size}`);
+    }
   }
   console.log("======================================\n");
 
@@ -1084,6 +1248,9 @@ export function handleSummary(data) {
     'workspaces_backed_up',
     'backup_success_rate',
     'backup_job_duration',
+    'imagestreamtags_backed_up',
+    'imagestreamtags_total',
+    'imagestreamtag_success_rate',
     'imagestreams_created',
     'imagestreams_expected',
     'restore_workspaces_total',

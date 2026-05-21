@@ -1,0 +1,18 @@
+{
+  "description": "CRC / small OpenShift cluster — OpenShift internal registry backup (30 workspaces). Exercises ImageStreamTag-based backup detection (openshift-internal only). Requires DevWorkspace Operator, ~30+ GiB free cluster storage, and oc/kubectl logged into CRC.",
+  "tests": [],
+  "custom_tests": [
+    {
+      "name": "backup_30_separate_ns_internal_crc",
+      "enabled": true,
+      "description": "Primary: 30 workspaces, separate namespaces, openshift-internal, ImageStreamTag success criteria",
+      "args": "--mode binary --max-vus 30 --max-devworkspaces 30 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 900 --test-duration-minutes 15 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"\" --registry-secret \"\" --backup-wait-minutes 20"
+    },
+    {
+      "name": "backup_30_single_ns_internal_crc",
+      "enabled": false,
+      "description": "Lighter CRC variant: 30 workspaces in one namespace (less API/namespace overhead)",
+      "args": "--mode binary --max-vus 30 --max-devworkspaces 30 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 900 --test-duration-minutes 15 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"\" --registry-secret \"\" --backup-wait-minutes 20"
+    }
+  ]
+}

@@ -23,6 +23,7 @@ The backup load tests verify:
 - **Correct Mode** (`correct`): DWOC properly configured with backup enabled, registry path, and auth secret (external registry like quay.io)
   - Pushes to external registry as OCI artifacts
   - Requires registry credentials (secret)
+  - **k6 success criteria**: backup Job creation and Job completion (not ImageStreamTags)
   - Backup schedule: configurable (default: `*/2 * * * *` - every 2 minutes for testing)
 
 - **Incorrect Mode** (`incorrect`): DWOC misconfigured (for testing failure scenarios)
@@ -34,6 +35,7 @@ The backup load tests verify:
 
 - **OpenShift Internal Mode** (`openshift-internal`): DWOC configured to use OpenShift's internal image registry
   - Pushes to ImageStreamTags in the workspace namespace
+  - **k6 success criteria**: `ImageStreamTag` `<workspace-name>:latest` per workspace (Jobs are tracked for ops metrics only)
   - Uses service account token for authentication (no secret required)
   - Auto-detects the registry route or uses internal service
   - Includes `--insecure` flag for ORAS to handle self-signed certificates
@@ -287,8 +289,11 @@ The test collects comprehensive metrics:
 - `backup_success_rate` - Percentage of successful backups
 - `backup_job_duration` - Time taken for backup jobs to complete
 - `workspaces_backed_up` - Number of workspaces successfully backed up
-- `imagestreams_created` - Number of ImageStreams created (OpenShift internal registry mode only)
-- `imagestreams_expected` - Number of ImageStreams expected (OpenShift internal registry mode only)
+- `imagestreamtags_backed_up` - Workspaces with backup `ImageStreamTag` (openshift-internal only; updated during monitoring)
+- `imagestreamtags_total` - Total workspaces expected to have a backup tag (openshift-internal only)
+- `imagestreamtag_success_rate` - Ratio of workspaces with backup tags (openshift-internal only)
+- `imagestreams_created` - Final ImageStreamTag count at verification (openshift-internal only; legacy CSV name)
+- `imagestreams_expected` - Expected ImageStreamTag count (openshift-internal only; legacy CSV name)
 
 ### Restore Metrics
 - `restore_workspaces_total` - Total restore attempts
@@ -337,6 +342,14 @@ kubectl label secret your-registry-secret \
 - Verify DWOC backup configuration: `kubectl get dwoc devworkspace-operator-config -o yaml`
 - Check that DevWorkspaces are stopped: `kubectl get dw -A`
 - Ensure registry secret exists and has proper labels
+
+**Only `openshift-internal` uses ImageStreamTag-based backup detection.** External modes (`correct`,
+`incorrect`) continue to use backup Job status. For openshift-internal, verify with:
+
+```bash
+kubectl get imagestreamtags -A | grep loadtest
+kubectl get imagestreamtag <workspace-name>:latest -n <workspace-namespace>
+```
 
 ### Backup jobs failing
 

@@ -280,7 +280,48 @@ sed -i 's/quay.io\/CHANGEME/quay.io\/yourusername/g' \
 
 **For detailed documentation, see:** [BACKUP_LOAD_TESTING.md](../test-devworkspace-controller-load/BACKUP_LOAD_TESTING.md)
 
-### 9. `webhook-crc-test-plan.json` - Webhook Server CRC/Local Testing
+### 9. `backup-restore-crc-openshift-internal-test-plan.json` - CRC OpenShift Internal Backup (30 workspaces)
+
+Small-scale backup test for **CRC** or other resource-limited OpenShift clusters. Uses
+`openshift-internal` only (ImageStreamTag `:latest` per workspace as success signal).
+
+| Test | Workspaces | Namespaces | Enabled |
+|------|------------|------------|---------|
+| `backup_30_separate_ns_internal_crc` | 30 | separate | yes |
+| `backup_30_single_ns_internal_crc` | 30 | single | no (lighter fallback) |
+
+**Run via suite runner (recommended):**
+
+```bash
+# Logged into CRC (oc login). Optional: faster backup cron during test
+export BACKUP_SCHEDULE="*/2 * * * *"
+
+./scripts/run_all_backup_loadtests.sh \
+  test-plans/backup-restore-crc-openshift-internal-test-plan.json
+```
+
+**Run a single test directly:**
+
+```bash
+make test_backup \
+  MAX_DEVWORKSPACES=30 \
+  BACKUP_MONITOR_DURATION=20 \
+  DWOC_CONFIG_TYPE=openshift-internal \
+  SEPARATE_NAMESPACE=true \
+  REGISTRY_PATH="" \
+  REGISTRY_SECRET="" \
+  BACKUP_SCHEDULE="*/2 * * * *" \
+  MAX_RESTORE_SAMPLES=5
+```
+
+**Pass criteria (k6 summary):** `imagestreamtags_backed_up` = 30,
+`imagestreamtag_success_rate` ≥ 0.95, `workspaces_backed_up` = 30.
+
+**CRC tips:** Ensure DWO is installed; allow ~20–40 minutes end-to-end. If the cluster is
+tight on memory, set `backup_30_single_ns_internal_crc` to `enabled: true` and disable the
+separate-namespaces test.
+
+### 10. `webhook-crc-test-plan.json` - Webhook Server CRC/Local Testing
 Quick webhook server load tests for local development clusters (CRC, Minikube, etc.):
 - 50 users - smoke test - enabled
 - 100 users - light load - enabled
