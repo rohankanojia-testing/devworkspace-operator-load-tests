@@ -76,7 +76,7 @@ export const options = {
     // openshift-internal: backup success is measured via ImageStreamTags, not ephemeral Jobs
     'backup_jobs_total': useImageStreamTagBackup ? [] : ['value>0'],
     'backup_jobs_succeeded': useImageStreamTagBackup || dwocConfigType === 'incorrect' ? [] : ['value>0'],
-    'backup_jobs_failed': dwocConfigType === 'incorrect' ? ['value>0'] : ['value==0'],
+    'backup_jobs_failed': useImageStreamTagBackup ? [] : (dwocConfigType === 'incorrect' ? ['value>0'] : ['value==0']),
     'backup_pods_total': useImageStreamTagBackup ? [] : ['value>0'],
     'workspaces_stopped': ['count>0'],
     'workspaces_backed_up': dwocConfigType === 'incorrect' ? [] : ['count>0'],
@@ -601,8 +601,8 @@ function updateBackupJobMetrics(jobs, backedUpCount) {
 
   const totalJobsSeen = seenJobUids.size;
   const totalPermanentlyFailedJobs = permanentlyFailedJobUids.size;
-  const totalSucceededJobs = useImageStreamTagBackup ? backedUpCount : countJobSucceededBackups(jobs);
-  const totalFailedJobs = totalJobsSeen - totalSucceededJobs - currentRunning;
+  const totalSucceededJobs = countJobSucceededBackups(jobs);
+  const totalFailedJobs = Math.max(0, totalJobsSeen - totalSucceededJobs - currentRunning);
 
   let cumulativePodCount = 0;
   for (const count of totalPodsCreated.values()) {
@@ -639,13 +639,16 @@ function updateBackupJobMetrics(jobs, backedUpCount) {
     backupSuccessRate.add(totalSucceededJobs / totalJobsSeen);
   }
 
+  const backedUpLabel = useImageStreamTagBackup
+    ? `imageStreamTags=${backedUpCount}/${backupStatusMap.size}`
+    : `backedUp=${backedUpCount}/${backupStatusMap.size}`;
   console.log(
     `Jobs: total=${totalJobsSeen}, ` +
     `succeeded=${totalSucceededJobs}, ` +
     `failed=${totalFailedJobs} (perm=${totalPermanentlyFailedJobs}), ` +
     `running=${currentRunning}, ` +
     `pods=${cumulativePodCount}, ` +
-    `backedUp=${backedUpCount}/${backupStatusMap.size}, ` +
+    `${backedUpLabel}, ` +
     `jobs/ws=${avgJobsPerWorkspace.toFixed(2)} (max=${maxJobsForAnyWorkspace})`,
   );
 }

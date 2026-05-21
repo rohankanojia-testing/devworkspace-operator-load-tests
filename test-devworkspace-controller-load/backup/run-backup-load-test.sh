@@ -467,9 +467,60 @@ delete_namespace() {
   log_success "Namespace deletion initiated"
 }
 
+# Decode JWT payload (no token value logged) and print cluster-granted TTL.
+log_kube_token_ttl_info() {
+  local token="${1}"
+  local payload_b64="${token#*.}"
+  payload_b64="${payload_b64%%.*}"
+
+  if [[ -z "${payload_b64}" ]]; then
+    log_warning "Could not parse token JWT; requested duration: ${TOKEN_TTL}"
+    return 0
+  fi
+
+  local pad_len=$(( (4 - ${#payload_b64} % 4) % 4 ))
+  if [[ "${pad_len}" -gt 0 ]]; then
+    payload_b64="${payload_b64}$(printf '=%.0s' $(seq 1 "${pad_len}"))"
+  fi
+
+  local decoded=""
+  if decoded=$(printf '%s' "${payload_b64}" | tr '_-' '/+' | base64 -d 2>/dev/null); then
+    :
+  elif decoded=$(printf '%s' "${payload_b64}" | tr '_-' '/+' | base64 -D 2>/dev/null); then
+    :
+  else
+    log_warning "Could not decode token JWT; requested duration: ${TOKEN_TTL}"
+    return 0
+  fi
+
+  local ttl_info
+  if ! ttl_info=$(printf '%s' "${decoded}" | jq -c "{
+    sa: \"${SA_NAME}\",
+    namespace: \"${LOAD_TEST_NAMESPACE}\",
+    requested_duration: \"${TOKEN_TTL}\",
+    iat: .iat,
+    exp: .exp,
+    ttl_seconds: (.exp - .iat),
+    ttl_hours: ((.exp - .iat) / 3600)
+  }" 2>/dev/null); then
+    log_warning "Could not read iat/exp from token; requested duration: ${TOKEN_TTL}"
+    return 0
+  fi
+
+  log_info "ServiceAccount token TTL (from JWT, token value not logged):"
+  log_info "  ${ttl_info}"
+
+  local ttl_seconds
+  ttl_seconds=$(printf '%s' "${ttl_info}" | jq -r '.ttl_seconds')
+  if [[ -n "${ttl_seconds}" && "${TOKEN_TTL}" == "6h" && "${ttl_seconds}" -lt 21600 ]]; then
+    log_warning "Cluster granted TTL (${ttl_seconds}s) is less than requested (${TOKEN_TTL}); long runs may hit 401 Unauthorized"
+  fi
+}
+
 generate_token_and_api_url() {
-  log_info "Generating token..."
+  log_info "Generating token for ${SA_NAME} in ${LOAD_TEST_NAMESPACE} (requested duration: ${TOKEN_TTL})..."
   KUBE_TOKEN=$(kubectl create token "${SA_NAME}" -n "${LOAD_TEST_NAMESPACE}" --duration="${TOKEN_TTL}")
+  log_kube_token_ttl_info "${KUBE_TOKEN}"
 
   log_info "Getting Kubernetes API server URL..."
   KUBE_API=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
