@@ -320,38 +320,13 @@ extract_metrics() {
         echo "=== Test Metrics ==="
         echo ""
 
-        # Extract k6 summary if present
-        if grep -q "checks\.\+:" "$LOG_FILE"; then
-            echo "--- K6 Summary ---"
-            grep -A 50 "checks\.\+:" "$LOG_FILE" | head -30 || true
-            echo ""
-        fi
-
-        # Extract DevWorkspace creation stats
-        if grep -q "DevWorkspaces created" "$LOG_FILE"; then
-            echo "--- DevWorkspace Stats ---"
-            grep "DevWorkspaces created\|DevWorkspaces ready\|Failed\|Error" "$LOG_FILE" | tail -20 || true
-            echo ""
-        fi
-
-        # Extract any errors
-        echo "--- Errors ---"
-        grep -i "error\|failed\|timeout" "$LOG_FILE" | tail -10 || echo "No errors found"
-
-        # Check for failure report
         local FAILURE_REPORT="${LOG_FILE%.log}_failure_report.csv"
-        if [ -f "$FAILURE_REPORT" ]; then
-            echo ""
+        if [ -f "$FAILURE_REPORT" ] && grep -qE '^"?load-test-' "$FAILURE_REPORT" 2>/dev/null; then
             echo "--- Failed DevWorkspaces ---"
-            local failure_count=$(wc -l < "$FAILURE_REPORT" | xargs)
-            echo "Total failures: $failure_count"
-            echo ""
-            echo "First 5 failures:"
-            head -5 "$FAILURE_REPORT" || true
-            echo ""
-            echo "See full report: $FAILURE_REPORT"
+            grep -E '^"?load-test-' "$FAILURE_REPORT" || true
+        else
+            echo "Failed DevWorkspaces: None"
         fi
-
     } > "$METRICS_FILE"
 }
 

@@ -289,24 +289,39 @@ sed -i 's/quay.io\/CHANGEME/quay.io\/yourusername/g' \
 
 **For detailed documentation, see:** [BACKUP_LOAD_TESTING.md](./test-devworkspace-controller-load/BACKUP_LOAD_TESTING.md)
 
-## Running Tests on Remote Performance Lab Clusters
+## Running Load Tests with the `run-loadtest` Skill
 
-For automated testing on remote performance lab clusters, use the **`run-loadtest` skill** with [Claude Code](https://claude.ai/claude-code):
+Use the **`run-loadtest` skill** with [Claude Code](https://claude.ai/claude-code) or Cursor to automate pre-release load testing on either cluster type:
 
 ```bash
 /run-loadtest
 ```
 
-**What it automates:**
-1. ✅ Verifies DevWorkspace Operator installation
-2. ✅ Checks DevWorkspaceOperatorConfig settings
-3. ✅ Ensures load test repository is cloned
-4. ✅ Runs test in tmux session (survives SSH disconnects)
-5. ✅ **Monitors progress every 10 minutes automatically**
-6. ✅ **Parses logs to CSV automatically after completion**
-7. ✅ **Displays CSV results ready to copy to Google Sheets**
+### Cluster Modes
 
-**Prerequisites:**
+| Mode | How you connect | Where tests run | Controller test plan |
+|------|-----------------|-----------------|----------------------|
+| **CRC QE AWS** | `oc login` locally to 32-node cluster | Your workstation (background script, no tmux) | `devspaces-prerelease-test-plan.json` |
+| **Performance Labs** | `ssh ${PERFLAB_USER}@${PERFLAB_HOST}` | Remote perf lab instance (remote tmux) | `controller-test-plan.json` |
+
+CRC QE AWS and Performance Labs are **separate modes** — prerelease plan and custom `make test_load` args apply to CRC QE AWS only.
+
+**What it automates (both modes):**
+1. ✅ Verifies repo, OpenShift login, and cluster capacity
+2. ✅ Checks DWO version (confirm on QE AWS; install on Performance Labs)
+3. ✅ Patches DevWorkspaceOperatorConfig for load testing (`imagePullPolicy`, `progressTimeout`)
+4. ✅ Runs controller load tests — CRC QE AWS uses background script + `devspaces-prerelease-test-plan.json` (1500 single ns + 1500 separate ns); Performance Labs uses remote tmux + `controller-test-plan.json`
+5. ✅ **Monitors progress every 10 minutes automatically**
+6. ✅ **Generates report files** — `controller_load_test_results.csv` + `loadtest_report.md` in `outputs/run_<timestamp>/`
+7. ✅ **Shares report file paths** and instructs user to publish to Google Sheet **DevSpaces 3.29.0-RC.02.07 Load Testing Results** and Google Doc **DevSpaces 3.29.0-RC.02.07 Load Testing**
+
+**QE AWS prerequisites:**
+```bash
+oc login <cluster-api-url> -u kubeadmin -p <password>   # cluster bot
+# k6, jq installed locally; repo cloned locally (tmux not required for QE AWS)
+```
+
+**Performance Labs prerequisites:**
 ```bash
 export PERFLAB_USER=your-username
 export PERFLAB_HOST=perflab.example.com
@@ -314,9 +329,12 @@ export PERFLAB_HOST=perflab.example.com
 
 **Manual monitoring (optional):**
 ```bash
-# Check live output
+# QE AWS (local background)
+./scripts/run-qe-aws-loadtest-background.sh --status
+tail -f outputs/loadtest_current.log
+
+# Performance Labs (remote tmux)
 ssh -t $PERFLAB_USER@$PERFLAB_HOST "tmux attach-session -t loadtest"
-# Press Ctrl+b then d to detach
 ```
 
 See `.skills/run-loadtest/SKILL.md` for complete documentation.

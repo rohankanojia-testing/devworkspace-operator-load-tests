@@ -145,18 +145,54 @@ Quick validation to verify everything is working:
 ./scripts/run_all_loadtests.sh test-plans/minimal-test-plan.json
 ```
 
-### 2. `devspaces-prerelease-test-plan.json` - Pre-Release Testing
-Standard pre-release load testing configuration:
+### 2. `devspaces-prerelease-test-plan.json` - CRC QE AWS Pre-Release Testing
+Standard pre-release load testing for the CRC QE Amazon 32-node DevSpaces cluster (custom `make test_load` args):
 - 1500 DevWorkspaces in single namespace (40 min)
-- 1500 DevWorkspaces in separate namespaces (60 min)
+- 1500 DevWorkspaces in separate namespaces (40 min)
 
 **Usage:**
 ```bash
 ./scripts/run_all_loadtests.sh test-plans/devspaces-prerelease-test-plan.json
 ```
 
-### 3. `controller-test-plan.json` - Full Scale Options
-Comprehensive test plan with multiple scale options (all disabled by default):
+Equivalent manual runs:
+```bash
+make test_load ARGS="--mode binary --create-automount-resources true --max-devworkspaces 1500 --delete-devworkspace-after-ready false --separate-namespaces false --test-duration-minutes 40"
+
+make test_load ARGS="--mode binary --create-automount-resources true --max-devworkspaces 1500 --delete-devworkspace-after-ready false --separate-namespaces true --test-duration-minutes 40"
+```
+
+**Output logs** (under latest `outputs/run_YYYYMMDD_HHMMSS/logs/`):
+
+| Test | Log file |
+|------|----------|
+| Single namespace | `1500_single_ns_40m.log` |
+| Separate namespaces | `1500_separate_ns_40m.log` |
+
+Parse to CSV: `./scripts/parse-controller-outputs.sh outputs/run_<timestamp>/`
+
+**Report files** (after both runs):
+
+```bash
+./scripts/generate-prerelease-loadtest-report.sh outputs/run_20260520_031456 outputs/cluster_capacity_*.txt
+# → outputs/run_20260520_031456/controller_load_test_results.csv
+# → outputs/run_20260520_031456/loadtest_report.md
+```
+
+Publish: Google Sheet **DevSpaces 3.29.0-RC.02.07 Load Testing Results** (CSV import); Google Doc **DevSpaces 3.29.0-RC.02.07 Load Testing** (markdown paste).
+
+### 2b. `devspaces-prerelease-single-ns-test-plan.json` - Single Namespace Retry
+Run only `1500_single_ns_40m` when the full prerelease plan's single-ns test failed (e.g. webhook restart timeout):
+
+```bash
+RUN_ENV="RESTART_OPERATOR=false" \
+  ./scripts/run-qe-aws-loadtest-background.sh \
+  test-plans/devspaces-prerelease-single-ns-test-plan.json
+```
+
+Merge `1500_single_ns_40m.log` into the main `run_*` dir before generating the combined report.
+
+### 3. `controller-test-plan.json` - Performance Labs / Configurable Scale
 - 1000, 1500, 2000, 2500 DevWorkspaces in both single and separate namespace modes
 - Enable specific tests as needed
 
