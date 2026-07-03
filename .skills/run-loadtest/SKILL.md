@@ -556,14 +556,16 @@ Do **not** use this plan on Performance Labs. Do **not** offer alternative plans
 
 **Retry single namespace only** (if separate-ns passed but single-ns failed on pre-test cleanup):
 
+Disable the separate-ns test in `devspaces-prerelease-test-plan.json` (`"enabled": false` on `1500_separate_ns_40m`), then:
+
 ```bash
 # User's terminal — skip operator restart to avoid webhook pod timeout flake
 RUN_ENV="RESTART_OPERATOR=false" \
   ./scripts/run-qe-aws-loadtest-background.sh \
-  test-plans/devspaces-prerelease-single-ns-test-plan.json
+  test-plans/devspaces-prerelease-test-plan.json
 ```
 
-Plan file: `test-plans/devspaces-prerelease-single-ns-test-plan.json` (one test: `1500_single_ns_40m` only).
+Re-enable separate-ns in the plan after the retry. Merge single-ns logs into the main `run_*` dir before generating the combined report (Step 12e).
 
 ### Performance Labs controller test plan (`perflab` only)
 

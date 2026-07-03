@@ -181,16 +181,7 @@ Parse to CSV: `./scripts/parse-controller-outputs.sh outputs/run_<timestamp>/`
 
 Publish: Google Sheet **DevSpaces 3.29.0-RC.02.07 Load Testing Results** (CSV import); Google Doc **DevSpaces 3.29.0-RC.02.07 Load Testing** (markdown paste).
 
-### 2b. `devspaces-prerelease-single-ns-test-plan.json` - Single Namespace Retry
-Run only `1500_single_ns_40m` when the full prerelease plan's single-ns test failed (e.g. webhook restart timeout):
-
-```bash
-RUN_ENV="RESTART_OPERATOR=false" \
-  ./scripts/run-qe-aws-loadtest-background.sh \
-  test-plans/devspaces-prerelease-single-ns-test-plan.json
-```
-
-Merge `1500_single_ns_40m.log` into the main `run_*` dir before generating the combined report.
+**Single-ns retry only:** set `"enabled": false` on `1500_separate_ns_40m` in this plan, then run with `RUN_ENV="RESTART_OPERATOR=false"`.
 
 ### 3. `controller-test-plan.json` - Performance Labs / Configurable Scale
 - 1000, 1500, 2000, 2500 DevWorkspaces in both single and separate namespace modes
