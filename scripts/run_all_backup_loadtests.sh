@@ -474,14 +474,26 @@ parse_backup_args() {
     BACKUP_MONITOR_DURATION=$(echo "$args" | grep -oP '(?<=--backup-wait-minutes )\S+' || echo "30")
     SEPARATE_NAMESPACE=$(echo "$args" | grep -oP '(?<=--separate-namespaces )\S+' || echo "false")
     DWOC_CONFIG_TYPE=$(echo "$args" | grep -oP '(?<=--dwoc-config-type )\S+' || echo "correct")
-    REGISTRY_PATH=$(echo "$args" | grep -oP '(?<=--registry-path )\S+' || echo "quay.io/rokumar")
-    REGISTRY_SECRET=$(echo "$args" | grep -oP '(?<=--registry-secret )\S+' || echo "quay-push-secret")
+
+    # For registry path and secret, match quoted empty strings or non-whitespace
+    # Pattern: --registry-path "" or --registry-path <value>
+    if echo "$args" | grep -qP '--registry-path\s+""\s'; then
+        REGISTRY_PATH=""
+    else
+        REGISTRY_PATH=$(echo "$args" | grep -oP '(?<=--registry-path )\S+' || echo "quay.io/rokumar")
+    fi
+
+    if echo "$args" | grep -qP '--registry-secret\s+""\s'; then
+        REGISTRY_SECRET=""
+    else
+        REGISTRY_SECRET=$(echo "$args" | grep -oP '(?<=--registry-secret )\S+' || echo "quay-push-secret")
+    fi
 
     # Extract backup schedule if specified (handle quoted values with space)
     BACKUP_SCHEDULE=$(echo "$args" | grep -oP "(?<=--backup-schedule )['\"]?[^'\"]+['\"]?" || echo "*/10 * * * *")
     BACKUP_SCHEDULE=$(echo "$BACKUP_SCHEDULE" | tr -d '"' | tr -d "'")
 
-    # Remove quotes from registry path and secret if present
+    # Remove quotes from registry path and secret if present (only if non-empty)
     REGISTRY_PATH=$(echo "$REGISTRY_PATH" | tr -d '"')
     REGISTRY_SECRET=$(echo "$REGISTRY_SECRET" | tr -d '"')
 
