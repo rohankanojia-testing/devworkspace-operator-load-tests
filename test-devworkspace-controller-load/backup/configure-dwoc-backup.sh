@@ -113,6 +113,13 @@ apply_openshift_internal_dwoc_config() {
   if kubectl get devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" >/dev/null 2>&1; then
     # Config exists, patch it
     log_info "DevWorkspaceOperatorConfig exists, patching..."
+
+    # First, remove authSecret field if it exists (merge patch doesn't delete fields with null)
+    kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type json --patch '[
+      {"op": "remove", "path": "/config/workspace/backupCronJob/registry/authSecret"}
+    ]' 2>/dev/null || log_info "No authSecret field to remove (or removal failed, will proceed anyway)"
+
+    # Then apply the openshift-internal configuration
     kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type merge --patch "$(cat <<EOF
 {
   "config": {
@@ -127,7 +134,6 @@ apply_openshift_internal_dwoc_config() {
           "extraArgs": "--insecure"
         },
         "registry": {
-          "authSecret": null,
           "path": "${registry_path}"
         }
       }
