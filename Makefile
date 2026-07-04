@@ -35,8 +35,8 @@ test_backup:
 		$(or $(BACKUP_MONITOR_DURATION),30) \
 		$(or $(LOAD_TEST_NAMESPACE),loadtest-devworkspaces) \
 		$(or $(DWO_NAMESPACE),openshift-operators) \
-		$(or $(REGISTRY_PATH),) \
-		$(or $(REGISTRY_SECRET),) \
+		"$(REGISTRY_PATH)" \
+		"$(REGISTRY_SECRET)" \
 		$(or $(DWOC_CONFIG_TYPE),openshift-internal) \
 		$(or $(SEPARATE_NAMESPACE),false) \
 		"$(or $(BACKUP_SCHEDULE),*/10 * * * *)" \
