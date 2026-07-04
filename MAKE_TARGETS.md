@@ -73,7 +73,7 @@ make test_backup \
 | `BACKUP_MONITOR_DURATION` | `30` | Minutes to monitor backups |
 | `LOAD_TEST_NAMESPACE` | `loadtest-devworkspaces` | Namespace for workspaces |
 | `DWO_NAMESPACE` | `openshift-operators` | Operator namespace |
-| `REGISTRY_PATH` | `quay.io/rokumar` | Container registry path |
+| `REGISTRY_PATH` | `""` (empty for OpenShift internal) | Container registry path |
 | `REGISTRY_SECRET` | `quay-push-secret` | Registry secret name |
 
 **Examples:**

@@ -268,7 +268,7 @@ The complete backup load test (`backup-load-test.sh`) performs these phases:
 | `BACKUP_MONITOR_DURATION` | How long to monitor backups (minutes) | `30` |
 | `LOAD_TEST_NAMESPACE` | Namespace for DevWorkspaces (single mode) | `loadtest-devworkspaces` |
 | `DWO_NAMESPACE` | DevWorkspace Operator namespace | `openshift-operators` |
-| `REGISTRY_PATH` | Container registry path for backups | `quay.io/rokumar` |
+| `REGISTRY_PATH` | Container registry path for backups | `image-registry.openshift-image-registry.svc:5000` |
 | `REGISTRY_SECRET` | Secret name for registry auth | `quay-push-secret` |
 | `DWOC_CONFIG_TYPE` | DWOC config mode: `correct`, `incorrect`, or `openshift-internal` | `correct` |
 | `SEPARATE_NAMESPACE` | Use separate namespaces per workspace | `false` |

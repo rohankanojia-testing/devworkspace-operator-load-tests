@@ -1,0 +1,12 @@
+{
+  "description": "CRC Local Network Test Plan - 50 DevWorkspaces for testing PerformanceLabs workflow",
+  "tests": [],
+  "custom_tests": [
+    {
+      "name": "50_single_20m",
+      "args": "--mode binary --max-vus 50 --max-devworkspaces 50 --delete-devworkspace-after-ready false --separate-namespaces false --test-duration-minutes 20",
+      "enabled": true,
+      "description": "50 DevWorkspaces with 50 VUs in single namespace - quick test"
+    }
+  ]
+}

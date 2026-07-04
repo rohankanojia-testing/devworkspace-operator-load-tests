@@ -1,0 +1,54 @@
+{
+  "description": "CRC Multi-Scale Test Plan - Single and Separate Namespace modes with 50, 100, 150, 200 workspaces",
+  "tests": [],
+  "custom_tests": [
+    {
+      "name": "50_single_20m",
+      "args": "--mode binary --max-vus 50 --max-devworkspaces 50 --delete-devworkspace-after-ready false --separate-namespaces false --test-duration-minutes 20",
+      "enabled": true,
+      "description": "50 DevWorkspaces - Single Namespace"
+    },
+    {
+      "name": "100_single_20m",
+      "args": "--mode binary --max-vus 100 --max-devworkspaces 100 --delete-devworkspace-after-ready false --separate-namespaces false --test-duration-minutes 20",
+      "enabled": true,
+      "description": "100 DevWorkspaces - Single Namespace"
+    },
+    {
+      "name": "150_single_20m",
+      "args": "--mode binary --max-vus 150 --max-devworkspaces 150 --delete-devworkspace-after-ready false --separate-namespaces false --test-duration-minutes 20",
+      "enabled": true,
+      "description": "150 DevWorkspaces - Single Namespace"
+    },
+    {
+      "name": "200_single_20m",
+      "args": "--mode binary --max-vus 200 --max-devworkspaces 200 --delete-devworkspace-after-ready false --separate-namespaces false --test-duration-minutes 20",
+      "enabled": true,
+      "description": "200 DevWorkspaces - Single Namespace"
+    },
+    {
+      "name": "50_separate_20m",
+      "args": "--mode binary --max-vus 50 --max-devworkspaces 50 --delete-devworkspace-after-ready false --separate-namespaces true --test-duration-minutes 20",
+      "enabled": true,
+      "description": "50 DevWorkspaces - Separate Namespaces"
+    },
+    {
+      "name": "100_separate_20m",
+      "args": "--mode binary --max-vus 100 --max-devworkspaces 100 --delete-devworkspace-after-ready false --separate-namespaces true --test-duration-minutes 20",
+      "enabled": true,
+      "description": "100 DevWorkspaces - Separate Namespaces"
+    },
+    {
+      "name": "150_separate_20m",
+      "args": "--mode binary --max-vus 150 --max-devworkspaces 150 --delete-devworkspace-after-ready false --separate-namespaces true --test-duration-minutes 20",
+      "enabled": true,
+      "description": "150 DevWorkspaces - Separate Namespaces"
+    },
+    {
+      "name": "200_separate_20m",
+      "args": "--mode binary --max-vus 200 --max-devworkspaces 200 --delete-devworkspace-after-ready false --separate-namespaces true --test-duration-minutes 20",
+      "enabled": true,
+      "description": "200 DevWorkspaces - Separate Namespaces"
+    }
+  ]
+}

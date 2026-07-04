@@ -1539,19 +1539,24 @@ kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" 
 # Before fix: authSecret still present
 oc get devworkspaceoperatorconfig -n openshift-operators devworkspace-operator-config \
   -o jsonpath='{.config.workspace.backupCronJob.registry}'
-# Output: {"authSecret":"quay-push-secret","path":"quay.io/rokumar"}
+# Before fix (external registry): {"authSecret":"quay-push-secret","path":"quay.io/<username>"}
 
-# After fix: authSecret removed
+# After fix (OpenShift internal): authSecret removed
 # Output: {"path":"image-registry.openshift-image-registry.svc:5000"}
 ```
 
 **When debugging backup test failures**:
 1. Check backup job pod logs: `oc logs -n <namespace> job/<job-name>`
 2. Look for registry URL in "Backing up devworkspace ... to image" line
-3. If shows quay.io instead of internal registry → DWOC misconfigured
+3. If shows external registry (quay.io, etc.) instead of internal → DWOC misconfigured
 4. Verify DWOC: `oc get devworkspaceoperatorconfig -n openshift-operators -o jsonpath='{.config.workspace.backupCronJob.registry}'`
 5. Check for `authSecret` field — should be absent for internal registry
 6. Delete old backup jobs to force recreation: `oc delete jobs -n <namespace> -l devworkspace.devfile.io/backup-job=true`
+
+**Default configuration** (as of 2026-07-05):
+- All backup tests default to `openshift-internal` registry (no external registry hardcoding)
+- `REGISTRY_PATH` and `REGISTRY_SECRET` default to empty strings
+- `DWOC_CONFIG_TYPE` defaults to `openshift-internal`
 - Extract full k6 summary from logs
 - Include backup-specific metrics (ImageStreamTag success, backup wait time, restore validation)
 - Structure: same as controller/webhook (Cluster Info, Operator Version, Test Results by workspace count, CSV)

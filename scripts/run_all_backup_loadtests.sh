@@ -477,16 +477,17 @@ parse_backup_args() {
 
     # For registry path and secret, match quoted empty strings or non-whitespace
     # Pattern: --registry-path "" or --registry-path <value>
+    # Default to empty for OpenShift internal registry (no hardcoded external registry)
     if echo "$args" | grep -qP '--registry-path\s+""\s'; then
         REGISTRY_PATH=""
     else
-        REGISTRY_PATH=$(echo "$args" | grep -oP '(?<=--registry-path )\S+' || echo "quay.io/rokumar")
+        REGISTRY_PATH=$(echo "$args" | grep -oP '(?<=--registry-path )\S+' || echo "")
     fi
 
     if echo "$args" | grep -qP '--registry-secret\s+""\s'; then
         REGISTRY_SECRET=""
     else
-        REGISTRY_SECRET=$(echo "$args" | grep -oP '(?<=--registry-secret )\S+' || echo "quay-push-secret")
+        REGISTRY_SECRET=$(echo "$args" | grep -oP '(?<=--registry-secret )\S+' || echo "")
     fi
 
     # Extract backup schedule if specified (handle quoted values with space)
