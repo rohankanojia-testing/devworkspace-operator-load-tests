@@ -45,7 +45,7 @@ ssh "${PERFLAB_USER}@${PERFLAB_HOST}" \
 | **Cluster** | CRC QE Amazon 32-node OpenShift (cluster bot) | Bare-metal OCP |
 | **Connect** | Local `oc login` | SSH to perf lab instance |
 | **Execution** | Local background script (no tmux) | Remote perf lab host (tmux) |
-| **Repo** | Local `REPO_DIR` | `/home/devworkspace-operator-load-tests` (remote) |
+| **Repo** | Local `REPO_DIR` | `REMOTE_REPO` (default: `/home/devworkspace-operator-load-tests`) — user-specified in Step 3 |
 | **DWO** | Verify only — do not install | Install via testing catalog if needed |
 | **Controller plan** | `devspaces-prerelease-test-plan.json` | `controller-test-plan.json` |
 
@@ -58,14 +58,15 @@ ssh "${PERFLAB_USER}@${PERFLAB_HOST}" \
 3. **Select test type** — controller / webhook / backup — **AskUserQuestion before cluster access**
 4. **Verify cluster access** — local `oc login` (qe-aws) or SSH to perf lab instance (perflab)
 5. **Check and log cluster capacity** — per-node CPU/memory (saved for final report)
-6. **Verify mode-specific prerequisites** — local tooling (qe-aws) or SSH vars (perflab)
+6. **Verify mode-specific prerequisites** — local tooling: kubectl, k6, jq (qe-aws) or **remote tooling: k6, kubectl on SSH host** + ask for remote repo path (perflab)
 7. **Check DWO version** — confirm only (qe-aws) or install if needed (perflab)
 8. **Patch DevWorkspaceOperatorConfig** — `imagePullPolicy`, `progressTimeout`
 9. **Check for existing test run** — background process (qe-aws) or tmux session (perflab)
 10. **Start test** — user runs background script from **their terminal** (qe-aws) or remote tmux (perflab)
 11. **Monitor** — agent reads saved log files + optional `track-dw-status`; user may say "status"
 12. **Generate report files** — CSV + markdown; merge multi-run logs if needed
-13. **Publish to Google** — Sheet + Doc (Step 12f)
+13. **Copy results locally** — **mandatory for perflab** (scp from remote), optional for qe-aws (already local)
+14. **Publish to Google** — Sheet + Doc (Step 12f)
 
 ---
 
@@ -125,9 +126,11 @@ Use `AskUserQuestion` if not already specified — **do this in the same turn as
 **Options:**
 1. **Controller Load Tests** — DevWorkspace controller at scale (**default for QE AWS pre-release**)
 2. **Webhook Load Tests** — admission control and validation
-3. **Backup Load Tests** — backup and restore under load
+3. **Backup Load Tests** — backup and restore under load (**OpenShift Internal registry only**)
 
 Store `TEST_TYPE` as `controller`, `webhook`, or `backup`. Set `TEST_PLAN` from Step 7 tables based on `CLUSTER_MODE` + `TEST_TYPE`.
+
+**Note:** Backup tests require OpenShift cluster with internal image registry enabled. They test PV backup/restore workflows by creating DevWorkspaces, backing up PVs to the internal registry, deleting workspaces, and restoring from backups.
 
 ---
 
@@ -197,8 +200,9 @@ run_remote() {
 
 | Variable | CRC QE AWS | Performance Labs |
 |----------|------------|------------------|
-| `REPO_DIR` | Local repo (Step 0a) | `/home/devworkspace-operator-load-tests` on remote |
-| `EXEC_REPO` | Same as `REPO_DIR` | `/home/devworkspace-operator-load-tests` on remote |
+| `REPO_DIR` | Local repo (Step 0a) | Local repo (Step 0a) — for skill orchestration/logs only |
+| `REMOTE_REPO` | N/A | User-specified remote path (Step 3, default: `/home/devworkspace-operator-load-tests`) |
+| `EXEC_REPO` | Same as `REPO_DIR` | Same as `REMOTE_REPO` (where tests execute) |
 
 ---
 
@@ -256,14 +260,93 @@ This is the **32-node AWS cluster** from cluster bot — not local CRC. Node cou
 
 ### Performance Labs (`perflab`)
 
-Already verified SSH in Step 1. Confirm remote repo path:
+Already verified SSH in Step 1. Now verify **remote host prerequisites** and ask for remote repo path.
+
+**Verify remote prerequisites** (k6, kubectl, jq on the remote host):
 
 ```bash
-REMOTE_REPO="/home/devworkspace-operator-load-tests"
+echo "Checking prerequisites on remote host..."
+
+# Check k6
+if ! run_remote "command -v k6 >/dev/null 2>&1"; then
+  echo "❌ k6 not found on remote host ${PERFLAB_HOST}"
+  echo ""
+  echo "Install k6 on the remote host:"
+  echo "  ssh ${PERFLAB_USER}@${PERFLAB_HOST}"
+  echo "  # Download and install k6:"
+  echo "  curl -L https://github.com/grafana/k6/releases/download/v0.47.0/k6-v0.47.0-linux-amd64.tar.gz | tar xz"
+  echo "  sudo mv k6-v0.47.0-linux-amd64/k6 /usr/local/bin/"
+  echo "  # Or install to user bin without sudo:"
+  echo "  mkdir -p ~/.local/bin && mv k6-v0.47.0-linux-amd64/k6 ~/.local/bin/"
+  echo "  export PATH=\"\$HOME/.local/bin:\$PATH\"  # add to ~/.bashrc"
+  exit 1
+fi
+
+# Check kubectl
+if ! run_remote "command -v kubectl >/dev/null 2>&1"; then
+  echo "❌ kubectl not found on remote host ${PERFLAB_HOST}"
+  exit 1
+fi
+
+# Check jq (optional but recommended)
+if ! run_remote "command -v jq >/dev/null 2>&1"; then
+  echo "⚠️  jq not found on remote host (optional, for JSON test plans)"
+fi
+
+echo "✅ Remote prerequisites verified:"
+run_remote "k6 version | head -1"
+run_remote "kubectl version --client=true --short 2>/dev/null || kubectl version --client 2>/dev/null | head -1"
+```
+
+If prerequisites are missing, **stop** and show install instructions. Do not proceed without k6 and kubectl on the remote host.
+
+**Ask for remote repo path:**
+
+Use `AskUserQuestion` if not already specified:
+
+**Question:** "What is the path to the load testing repository on the remote PerformanceLabs host?"
+
+**Default:** `/home/devworkspace-operator-load-tests`
+
+Store the answer in `REMOTE_REPO` (or use default if user accepts it).
+
+Then confirm the repo exists on the remote host:
+
+```bash
+REMOTE_REPO="${REMOTE_REPO:-/home/devworkspace-operator-load-tests}"
 run_remote "test -f ${REMOTE_REPO}/scripts/run_all_loadtests.sh && echo EXISTS || echo MISSING"
 ```
 
-Local `REPO_DIR` (Step 0a) is only for skill orchestration/logs; **tests execute on the SSH host**.
+If the repo exists:
+```
+✅ Remote repository found at: ${REMOTE_REPO}
+```
+
+If missing, offer to clone:
+
+```
+❌ Repository not found at: ${REMOTE_REPO}
+
+Clone it on the remote host?
+```
+
+**Options:** Yes, clone now / No, I'll set it up manually
+
+If user chooses to clone:
+
+```bash
+ssh "${PERFLAB_USER}@${PERFLAB_HOST}" \
+  "mkdir -p $(dirname ${REMOTE_REPO}) && cd $(dirname ${REMOTE_REPO}) && \
+   git clone https://github.com/devfile/devworkspace-operator-load-tests.git $(basename ${REMOTE_REPO})"
+```
+
+Then verify again:
+
+```bash
+run_remote "test -f ${REMOTE_REPO}/scripts/run_all_loadtests.sh && echo EXISTS || echo MISSING"
+```
+
+Local `REPO_DIR` (Step 0a) is only for skill orchestration/logs; **tests execute on the SSH host at `${REMOTE_REPO}`**.
 
 ---
 
@@ -505,19 +588,7 @@ Store `DWOC_LOG_FILE`, `DWOC_IMAGE_PULL_POLICY`, and `DWOC_PROGRESS_TIMEOUT` —
 
 For **QE AWS**, Step 0a already confirmed the local repo — skip this step.
 
-For **Performance Labs**, confirm the repo exists on the remote host:
-
-```bash
-REMOTE_REPO="/home/devworkspace-operator-load-tests"
-run_remote "test -f ${REMOTE_REPO}/scripts/run_all_loadtests.sh && echo EXISTS || echo MISSING"
-```
-
-If missing, offer to clone on the remote host:
-
-```bash
-ssh "${PERFLAB_USER}@${PERFLAB_HOST}" \
-  "cd /home && git clone https://github.com/devfile/devworkspace-operator-load-tests.git"
-```
+For **Performance Labs**, `REMOTE_REPO` was already confirmed in Step 3. This step is now part of Step 3 — skip to Step 7.
 
 ---
 
@@ -698,6 +769,20 @@ ssh "${PERFLAB_USER}@${PERFLAB_HOST}" \
 ```
 
 ### Backup Load Tests
+
+**Prerequisites:** Backup tests require **OpenShift cluster with internal image registry enabled**. They test PV backup/restore by:
+1. Creating DevWorkspaces with PVs
+2. Backing up PVs to OpenShift internal registry (`image-registry.openshift-image-registry.svc:5000`)
+3. Deleting DevWorkspaces
+4. Restoring PVs from registry backups
+
+**IMPORTANT:** Only use **OpenShift Internal registry** for backup load testing. **External registries (quay.io, Docker Hub, etc.) are NOT permitted** due to a past quay.io outage that affected production systems during load testing. Internal registry keeps all backup traffic within the cluster and prevents external service disruptions.
+
+Verify internal registry is running:
+```bash
+oc get deployment/image-registry -n openshift-image-registry
+oc get route/default-route -n openshift-image-registry
+```
 
 **QE AWS (local background):**
 
@@ -1169,24 +1254,89 @@ run_remote "cat ${EXEC_REPO}/${CSV_FILE}"
 The **final report order** shown to the user:
 1. **Report file locations** — `controller_load_test_results.csv` and `loadtest_report.md` in `outputs/run_<timestamp>/` (Step 12e)
 2. Test results location + `summary.txt` from `outputs/` (Step 11)
-3. Cluster capacity (Step 12a)
-4. DWO version (Step 12b)
-5. DevWorkspaceOperatorConfig (Step 12c)
-6. Parsed CSV display (Step 12d)
-7. **Publish to Google** — Sheet + Doc titles and import/paste steps (Step 12f)
+3. **Copy results locally** — **Performance Labs only**: download run directory + snapshots to local `${PWD}/outputs/` (Step 12g)
+4. Cluster capacity (Step 12a)
+5. DWO version (Step 12b)
+6. DevWorkspaceOperatorConfig (Step 12c)
+7. Parsed CSV display (Step 12d)
+8. **Publish to Google** — Sheet + Doc titles and import/paste steps (Step 12f)
 
-**Optional: copy full `outputs/` run directory locally**
+**For Performance Labs**, after Step 12g completes, **all file paths shown to the user must reference the LOCAL copies** in `${PWD}/outputs/`, not the remote paths.
 
-CRC QE AWS (already local):
+### 12g. Copy results to local directory (Performance Labs mandatory, QE AWS optional)
+
+**Performance Labs — MANDATORY: Download results from remote host**
+
+After parsing completes, copy the **entire run directory** from the remote host to your local working directory (where Claude/Cursor was launched):
 
 ```bash
-cp -r "${OUTPUT_DIR}" "${REPO_DIR}/loadtest-results-$(date +%Y%m%d)/"
+# Determine local destination — current working directory where agent launched
+LOCAL_DEST_DIR="${PWD}/outputs"
+mkdir -p "${LOCAL_DEST_DIR}"
+
+# Download the latest run directory from remote
+REMOTE_RUN_DIR="${OUTPUT_DIR}"  # e.g., /home/devworkspace-operator-load-tests/outputs/run_20260520_031456
+LOCAL_RUN_NAME="$(basename ${REMOTE_RUN_DIR})"
+
+echo "=========================================="
+echo "COPYING RESULTS FROM REMOTE HOST"
+echo "=========================================="
+echo "Remote dir: ${PERFLAB_USER}@${PERFLAB_HOST}:${REMOTE_RUN_DIR}"
+echo "Local dest: ${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}"
+echo "=========================================="
+
+scp -r "${PERFLAB_USER}@${PERFLAB_HOST}:${REMOTE_RUN_DIR}" "${LOCAL_DEST_DIR}/"
+
+# Verify copy succeeded
+if [[ -d "${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}" ]]; then
+  echo "✅ Results copied successfully to: ${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}"
+  echo ""
+  echo "Local files:"
+  ls -lh "${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}"
+  echo ""
+  echo "CSV: ${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}/controller_load_test_results.csv"
+  echo "Report: ${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}/loadtest_report.md"
+else
+  echo "❌ Failed to copy results locally"
+  exit 1
+fi
 ```
 
-Performance Labs (download from remote host):
+**Also copy pre-test snapshots** (capacity, DWO version, DWOC config) from remote `outputs/`:
 
 ```bash
-scp -r "${PERFLAB_USER}@${PERFLAB_HOST}:${OUTPUT_DIR}" "${REPO_DIR}/loadtest-results-$(date +%Y%m%d)/"
+echo "Copying pre-test snapshots..."
+scp "${PERFLAB_USER}@${PERFLAB_HOST}:${EXEC_REPO}/outputs/cluster_capacity_*.txt" "${LOCAL_DEST_DIR}/" 2>/dev/null || true
+scp "${PERFLAB_USER}@${PERFLAB_HOST}:${EXEC_REPO}/outputs/dwo_version_*.txt" "${LOCAL_DEST_DIR}/" 2>/dev/null || true
+scp "${PERFLAB_USER}@${PERFLAB_HOST}:${EXEC_REPO}/outputs/dwoc_config_*.txt" "${LOCAL_DEST_DIR}/" 2>/dev/null || true
+
+echo "✅ All results copied to local: ${LOCAL_DEST_DIR}"
+```
+
+**After copying**, update all file paths shown to user to reference **local paths**:
+
+```
+==========================================
+FINAL RESULTS (LOCAL COPIES)
+==========================================
+Run directory: ${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}
+CSV:           ${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}/controller_load_test_results.csv
+Report:        ${LOCAL_DEST_DIR}/${LOCAL_RUN_NAME}/loadtest_report.md
+
+Pre-test snapshots:
+  Cluster capacity: ${LOCAL_DEST_DIR}/cluster_capacity_*.txt
+  DWO version:      ${LOCAL_DEST_DIR}/dwo_version_*.txt
+  DWOC config:      ${LOCAL_DEST_DIR}/dwoc_config_*.txt
+==========================================
+```
+
+**CRC QE AWS — optional backup copy**
+
+Results are already local in `${REPO_DIR}/outputs/`. Optionally make a timestamped backup:
+
+```bash
+# Optional — create timestamped backup
+cp -r "${OUTPUT_DIR}" "${REPO_DIR}/outputs/loadtest-results-$(date +%Y%m%d_%H%M%S)/"
 ```
 
 **Clean up after completion:**
@@ -1298,9 +1448,128 @@ OUTPUT_FILE=outputs/run_<timestamp>/dw_status.csv \
 
 1. Merge logs if tests split across multiple `run_*` directories
 2. `./scripts/generate-prerelease-loadtest-report.sh <run_dir> outputs/cluster_capacity_*.txt`
-3. Share paths: `<run_dir>/loadtest_report.md` and `<run_dir>/controller_load_test_results.csv`
-4. User imports CSV → Google Sheet **DevSpaces 3.29.0-RC.02.07 Load Testing Results**
-5. User pastes markdown → Google Doc **DevSpaces 3.29.0-RC.02.07 Load Testing**
+3. **Performance Labs only**: Copy results locally with `scp -r` — mandatory (Step 12g)
+4. Share paths: `<run_dir>/loadtest_report.md` and `<run_dir>/controller_load_test_results.csv`
+   - **Performance Labs**: use LOCAL paths in `${PWD}/outputs/` after Step 12g copy
+   - **QE AWS**: use paths in `${REPO_DIR}/outputs/` (already local)
+5. User imports CSV → Google Sheet **DevSpaces 3.29.0-RC.02.07 Load Testing Results**
+6. User pastes markdown → Google Doc **DevSpaces 3.29.0-RC.02.07 Load Testing**
+
+### Failure report CSV validation
+
+**CRITICAL:** `*_failure_report.csv` files may contain **stale data from previous test runs** and are **not emptied between tests**. When generating markdown reports:
+
+1. **Check actual k6 output** for `devworkspace_ready_failed` metric — this is the authoritative failure count
+2. **Only include CSV data** when `devworkspace_ready_failed > 0` in the k6 log
+3. **Write "None"** for tests where `devworkspace_ready_failed: 0` regardless of CSV file contents
+
+Example detection logic:
+
+```bash
+has_failures() {
+  local log_file="$1"
+  local line=$(grep "devworkspace_ready_failed" "$log_file" | grep -v "^time=" | sed 's/\x1b\[[0-9;]*m//g')
+  local failed_count=$(echo "$line" | sed 's/.*devworkspace_ready_failed[.:]*//g' | awk '{print $1}')
+  
+  if [[ "$failed_count" =~ ^[0-9]+$ ]] && [[ "$failed_count" -gt 0 ]]; then
+    return 0  # Has failures - include CSV
+  else
+    return 1  # No failures - write "None"
+  fi
+}
+```
+
+**Why this matters:** Tests are often run sequentially in the same `logs/` directory. A failed test creates `50_single_20m_failure_report.csv`, then a later successful 50-workspace test reuses the same log directory but doesn't delete the old CSV. Trusting the CSV file without checking k6 metrics produces incorrect "failures" in the report for tests that actually passed.
+
+### Webhook and backup report generation
+
+**Webhook tests** (`generate-webhook-loadtest-report.sh`):
+- k6 metrics are in the **log files**, not separate `*_metrics.txt` files
+- Extract from `✓ exec forbidden for foreign workspace` to `load_test ✓` line (inclusive)
+- **Stop before cleanup output** — do NOT include `🧹 Force deleting all pods` or pod deletion lines
+- For failed tests: extract error context (3-10 lines) but exclude cleanup
+- Structure: same as controller reports (Cluster Info, Operator Version, Test Results by user count, CSV)
+
+**Backup tests** (`generate-backup-loadtest-report.sh`):
+- k6 metrics similar to controller tests (use `devworkspace_ready_failed` for failure detection)
+- **SECURITY**: Only OpenShift Internal registry permitted (external registries like quay.io NOT allowed due to past quay.io outage)
+- Test plan must use `--dwoc-config-type openshift-internal` with empty `--registry-path ""`
+
+### Backup test OpenShift internal registry bug
+
+**Bug**: When switching from external registry (quay.io) to OpenShift internal registry, `configure-dwoc-backup.sh` must explicitly **remove** the `authSecret` field from DWOC. Kubernetes JSON merge patches do NOT delete fields when set to `null` — they ignore the null value.
+
+**Symptom**: Backup jobs fail with `401: Unauthorized` error trying to push to quay.io instead of the internal registry, even though test plan specifies `--dwoc-config-type openshift-internal`.
+
+**Root cause**: Previous test runs configure DWOC with:
+```json
+{
+  "registry": {
+    "authSecret": "quay-push-secret",
+    "path": "quay.io/rokumar"
+  }
+}
+```
+
+When `apply_openshift_internal_dwoc_config()` runs, the merge patch with `"authSecret": null` doesn't remove the field — it's ignored. Backup jobs inherit the old quay.io config.
+
+**Fix** (committed in bb6b705):
+```bash
+# First, explicitly remove authSecret field using JSON patch 'remove' operation
+kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type json --patch '[
+  {"op": "remove", "path": "/config/workspace/backupCronJob/registry/authSecret"}
+]' 2>/dev/null || log_info "No authSecret field to remove"
+
+# Then apply merge patch for the rest
+kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type merge --patch '{
+  "config": {
+    "workspace": {
+      "backupCronJob": {
+        "registry": {
+          "path": "image-registry.openshift-image-registry.svc:5000"
+        }
+      }
+    }
+  }
+}'
+```
+
+**Verification**:
+```bash
+# Before fix: authSecret still present
+oc get devworkspaceoperatorconfig -n openshift-operators devworkspace-operator-config \
+  -o jsonpath='{.config.workspace.backupCronJob.registry}'
+# Output: {"authSecret":"quay-push-secret","path":"quay.io/rokumar"}
+
+# After fix: authSecret removed
+# Output: {"path":"image-registry.openshift-image-registry.svc:5000"}
+```
+
+**When debugging backup test failures**:
+1. Check backup job pod logs: `oc logs -n <namespace> job/<job-name>`
+2. Look for registry URL in "Backing up devworkspace ... to image" line
+3. If shows quay.io instead of internal registry → DWOC misconfigured
+4. Verify DWOC: `oc get devworkspaceoperatorconfig -n openshift-operators -o jsonpath='{.config.workspace.backupCronJob.registry}'`
+5. Check for `authSecret` field — should be absent for internal registry
+6. Delete old backup jobs to force recreation: `oc delete jobs -n <namespace> -l devworkspace.devfile.io/backup-job=true`
+- Extract full k6 summary from logs
+- Include backup-specific metrics (ImageStreamTag success, backup wait time, restore validation)
+- Structure: same as controller/webhook (Cluster Info, Operator Version, Test Results by workspace count, CSV)
+- Note: backup tests use `backup_run_*` directories, not `run_*`
+
+**k6 output extraction pattern** (webhook):
+```bash
+# Find start line (first check mark)
+start_line=$(grep -n "exec forbidden for foreign workspace\|exec allowed for own workspace" "$log_file" | head -1 | cut -d: -f1)
+
+# Find end line (load_test ✓)
+end_line=$(sed -n "${start_line},\$p" "$log_file" | grep -n "load_test ✓" | head -1 | cut -d: -f1)
+
+# Extract and clean (stop BEFORE cleanup lines)
+sed -n "${start_line},$((start_line + end_line - 1))p" "$log_file" | sed 's/\x1b\[[0-9;]*m//g'
+```
+
+**Common mistake:** Including cleanup output (`🧹 Force deleting...`, `pod "workspace..." deleted`) in k6 metrics section — these lines appear AFTER the test completes and should never be in the report's k6 Output section.
 
 ### Key file map (qe-aws)
 
@@ -1331,4 +1600,6 @@ OUTPUT_FILE=outputs/run_<timestamp>/dw_status.csv \
 - DevWorkspaceOperatorConfig is **automatically patched** in Step 5 (`imagePullPolicy: IfNotPresent`, `progressTimeout: 3600s`) — merge-patch if exists, create if missing
 - DevWorkspaceOperatorConfig patch is logged to `outputs/dwoc_config_<timestamp>.txt` and reprinted in final results (Step 12c)
 - After both tests finish, generate **`outputs/run_<timestamp>/controller_load_test_results.csv`** and **`outputs/run_<timestamp>/loadtest_report.md`** via `./scripts/generate-prerelease-loadtest-report.sh` — **share both paths with the user**
+- **Performance Labs Step 3:** **Check remote prerequisites first** — k6 and kubectl must be installed on the SSH host before tests can run; jq is optional but recommended for JSON test plans
+- **Performance Labs only (Step 12g):** **MANDATORY** — copy entire `outputs/run_<timestamp>/` directory + pre-test snapshots from remote host to local `${PWD}/outputs/` using `scp -r`; all file paths shown to user after this step must reference LOCAL copies
 - **Step 12f:** Instruct user to import CSV into Google Sheet **DevSpaces 3.29.0-RC.02.07 Load Testing Results** and paste markdown into Google Doc **DevSpaces 3.29.0-RC.02.07 Load Testing**
