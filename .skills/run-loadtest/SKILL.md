@@ -690,6 +690,94 @@ If a session exists, ask the user:
 
 ---
 
+## Step 8a: Pre-flight Check for Backup Tests (backup mode only)
+
+**ONLY for backup load tests** — skip this step for controller/webhook tests.
+
+Before starting backup tests, verify the OpenShift internal image registry is properly configured and accessible. Backup tests REQUIRE the internal registry to be running.
+
+### Check internal registry deployment
+
+```bash
+if [[ "$TEST_TYPE" == "backup" ]]; then
+  echo "Verifying OpenShift internal image registry..."
+  
+  # Check if image-registry deployment exists and is ready
+  REGISTRY_READY=$(run_remote "oc get deployment/image-registry -n openshift-image-registry -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo '0'")
+  
+  if [[ "$REGISTRY_READY" -eq 0 ]]; then
+    echo "❌ ERROR: OpenShift internal image registry is not running"
+    echo ""
+    echo "The image-registry deployment must be available for backup tests."
+    echo "Check registry status:"
+    echo "  oc get deployment/image-registry -n openshift-image-registry"
+    echo "  oc get clusteroperator/image-registry"
+    echo ""
+    echo "Common fixes:"
+    echo "  - Enable registry: oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{\"spec\":{\"managementState\":\"Managed\"}}'"
+    echo "  - Check storage: oc get config.imageregistry.operator.openshift.io/cluster -o yaml"
+    exit 1
+  fi
+  
+  # Check if default route exists (optional but recommended for external access)
+  ROUTE_EXISTS=$(run_remote "oc get route/default-route -n openshift-image-registry --no-headers 2>/dev/null | wc -l || echo '0'")
+  
+  if [[ "$ROUTE_EXISTS" -eq 0 ]]; then
+    echo "⚠️  WARNING: No external route found for image registry"
+    echo "Internal service will be used: image-registry.openshift-image-registry.svc:5000"
+    echo ""
+    echo "To create external route (optional):"
+    echo "  oc patch configs.imageregistry.operator.openshift.io/cluster --type merge -p '{\"spec\":{\"defaultRoute\":true}}'"
+  else
+    ROUTE_HOST=$(run_remote "oc get route/default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null")
+    echo "✅ Internal registry route: $ROUTE_HOST"
+  fi
+  
+  echo "✅ Internal image registry is ready"
+  echo ""
+fi
+```
+
+**For CRC clusters specifically**: The internal registry is usually pre-configured and running. If not, enable it:
+
+```bash
+# Enable registry management
+oc patch configs.imageregistry.operator.openshift.io/cluster --type merge \
+  -p '{"spec":{"managementState":"Managed"}}'
+
+# Set storage to emptyDir (for CRC/testing only - not for production)
+oc patch configs.imageregistry.operator.openshift.io/cluster --type merge \
+  -p '{"spec":{"storage":{"emptyDir":{}}}}'
+
+# Optionally create external route
+oc patch configs.imageregistry.operator.openshift.io/cluster --type merge \
+  -p '{"spec":{"defaultRoute":true}}'
+
+# Wait for registry to be ready
+oc wait --for=condition=Available --timeout=300s \
+  deployment/image-registry -n openshift-image-registry
+```
+
+**If registry check fails**, stop and instruct the user to fix the registry before proceeding with backup tests.
+
+### Verify DWOC is not already configured with external registry
+
+```bash
+if [[ "$TEST_TYPE" == "backup" ]]; then
+  # Check current DWOC backup registry configuration
+  CURRENT_REGISTRY=$(run_remote "oc get devworkspaceoperatorconfig -n openshift-operators devworkspace-operator-config -o jsonpath='{.config.workspace.backupCronJob.registry.path}' 2>/dev/null || echo ''")
+  
+  if [[ -n "$CURRENT_REGISTRY" ]] && [[ "$CURRENT_REGISTRY" != *"image-registry.openshift-image-registry"* ]] && [[ "$CURRENT_REGISTRY" != *"openshift-image-registry.apps"* ]]; then
+    echo "⚠️  WARNING: DWOC is configured with external registry: $CURRENT_REGISTRY"
+    echo "Backup test will reconfigure to use OpenShift internal registry"
+    echo "External registries (quay.io, Docker Hub, etc.) are NOT permitted for backup load testing"
+    echo ""
+  fi
+fi
+```
+
+---
+
 ## Step 9: Start Test
 
 Set `TEST_PLAN` and `TEST_RUNNER` from Step 7 based on `CLUSTER_MODE`:
