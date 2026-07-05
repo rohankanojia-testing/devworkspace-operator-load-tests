@@ -71,14 +71,21 @@ extract_avg() {
 }
 
 # Function to extract counter values
+# Handles two formats:
+#   1. Counter with rate: "metric_name: value rate/s" (e.g., "imagestreams_created: 25 0.17591/s")
+#   2. Gauge: "metric_name: value min=X max=Y" (e.g., "backup_jobs_succeeded: 25 min=0 max=25")
 extract_counter() {
     local input="$1"
     local counter_name="$2"
     echo "$input" | grep -E "^\s*✓?\s*✗?\s*$counter_name" | head -1 | awk '{
+        # Find the field after the metric name (which ends with :)
         for (i=1; i<=NF; i++) {
-            if ($i ~ /^[0-9]+$/ && $(i+1) ~ /^[0-9.]+\/s$/) {
-                printf "%s", $i
-                exit
+            if ($i ~ /:$/) {
+                # Next field should be the value
+                if ($(i+1) ~ /^[0-9]+(\.[0-9]+)?$/) {
+                    printf "%s", $(i+1)
+                    exit
+                }
             }
         }
         printf "0"
@@ -158,19 +165,21 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
 
     if [[ -z "$CONFIG_TYPE" ]]; then
         # Try to determine from log content
-        if grep -q "DWOC_CONFIG_TYPE: openshift-internal" "$LOG_FILE"; then
-            CONFIG_TYPE="openshift-internal"
-        elif grep -q "DWOC_CONFIG_TYPE: correct" "$LOG_FILE"; then
-            if grep -q "REGISTRY_PATH:.*quay.io" "$LOG_FILE"; then
-                CONFIG_TYPE="external registry correct"
-            else
-                CONFIG_TYPE="openshift-internal correct"
-            fi
-        elif grep -q "DWOC_CONFIG_TYPE: incorrect" "$LOG_FILE"; then
-            if grep -q "REGISTRY_PATH:.*quay.io" "$LOG_FILE"; then
+        # Match both "DWOC_CONFIG_TYPE:" and "DWOC Config Type:" formats
+        # Check "incorrect" first since "incorrect" contains "correct" as substring
+        if grep -qE "DWOC.*(C|c)onfig.*(T|t)ype:.*incorrect" "$LOG_FILE"; then
+            if grep -qE "Registry.*Path:.*quay\.io" "$LOG_FILE"; then
                 CONFIG_TYPE="external registry incorrect"
             else
                 CONFIG_TYPE="openshift-internal incorrect"
+            fi
+        elif grep -qE "DWOC.*(C|c)onfig.*(T|t)ype:.*openshift-internal" "$LOG_FILE"; then
+            CONFIG_TYPE="openshift-internal"
+        elif grep -qE "DWOC.*(C|c)onfig.*(T|t)ype:.*\bcorrect\b" "$LOG_FILE"; then
+            if grep -qE "Registry.*Path:.*quay\.io" "$LOG_FILE"; then
+                CONFIG_TYPE="external registry correct"
+            else
+                CONFIG_TYPE="openshift-internal correct"
             fi
         fi
     fi
