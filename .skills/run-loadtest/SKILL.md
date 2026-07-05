@@ -1578,9 +1578,71 @@ has_failures() {
 - For failed tests: extract error context (3-10 lines) but exclude cleanup
 - Structure: same as controller reports (Cluster Info, Operator Version, Test Results by user count, CSV)
 
-**Backup tests** (`generate-backup-loadtest-report.sh`):
-- k6 metrics similar to controller tests (use `devworkspace_ready_failed` for failure detection)
-- **SECURITY**: Only OpenShift Internal registry permitted (external registries like quay.io NOT allowed due to past quay.io outage)
+**Backup tests** - **CRITICAL: Always generate CSV + detailed markdown report**:
+
+After backup tests complete, **ALWAYS** generate both CSV and detailed markdown reports:
+
+```bash
+# 1. Parse backup outputs to CSV
+run_remote "cd ${EXEC_REPO} && rm -f backup_load_test_results.csv && ./scripts/parse-backup-outputs.sh ${OUTPUT_DIR}"
+
+# 2. Copy CSV locally
+CSV_FILE="backup_load_test_results.csv"
+scp "${PERFLAB_USER}@${PERFLAB_HOST}:${EXEC_REPO}/${CSV_FILE}" "${REPO_DIR}/outputs/"
+
+# 3. Generate detailed markdown report with backup metrics
+```
+
+**Detailed Markdown Report Structure** (must follow this format):
+
+```markdown
+# Backup Load Test Results - [Run Name]
+
+## Correct Registry Configuration
+
+### 25 Workspaces
+- Status, Duration, Configuration
+- Restore Verification Summary
+- Complete k6 backup metrics (backup_*, imagestream*, restore_*, workspaces_*)
+- Failures (if any)
+
+### 50 Workspaces
+[Same structure]
+
+### 75 Workspaces
+[Same structure]
+
+## Incorrect Registry Configuration
+
+### 25 Workspaces
+- Configuration with typo
+- Expected backup failures
+- Error logs
+
+### 50 Workspaces
+[Same structure]
+
+### 75 Workspaces
+[Same structure]
+
+## Summary
+- Tables with backup/restore metrics
+- CSV location
+```
+
+**Backup metrics to extract** (from k6 output):
+- `backup_job_duration`, `backup_jobs_succeeded`, `backup_jobs_failed`, `backup_jobs_total`
+- `backup_pods_total`, `backup_success_rate`
+- `imagestreams_created`, `imagestreams_expected`, `imagestreamtags_backed_up`
+- `restore_duration`, `restore_workspaces_succeeded`, `restore_workspaces_failed`, `restore_success_rate`
+- `workspaces_backed_up`, `workspaces_stopped`
+- Operator/ETCD resource metrics
+
+**Config type labels** (simplified):
+- `correct` - Proper OpenShift internal registry configuration
+- `incorrect` - Registry path with typo (expected failures)
+
+**SECURITY**: Only OpenShift Internal registry permitted (external registries like quay.io NOT allowed due to past quay.io outage)
 - Test plan must use `--dwoc-config-type openshift-internal` with empty `--registry-path ""`
 
 ### Backup test OpenShift internal registry bug
