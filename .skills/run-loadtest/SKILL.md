@@ -1583,15 +1583,26 @@ has_failures() {
 After backup tests complete, **ALWAYS** generate both CSV and detailed markdown reports:
 
 ```bash
-# 1. Parse backup outputs to CSV
+# 1. Parse backup outputs to CSV (saves in repo root)
 run_remote "cd ${EXEC_REPO} && rm -f backup_load_test_results.csv && ./scripts/parse-backup-outputs.sh ${OUTPUT_DIR}"
 
-# 2. Copy CSV locally
-CSV_FILE="backup_load_test_results.csv"
-scp "${PERFLAB_USER}@${PERFLAB_HOST}:${EXEC_REPO}/${CSV_FILE}" "${REPO_DIR}/outputs/"
+# 2. Copy CSV into the run directory (both remote and local)
+run_remote "cp ${EXEC_REPO}/backup_load_test_results.csv ${OUTPUT_DIR}/"
 
-# 3. Generate detailed markdown report with backup metrics
+# 3. Copy entire run directory locally (includes logs, CSV, summary)
+RUN_NAME=$(basename ${OUTPUT_DIR})
+scp -r "${PERFLAB_USER}@${PERFLAB_HOST}:${OUTPUT_DIR}" "${REPO_DIR}/outputs/"
+
+# 4. Generate detailed markdown report and save in run directory
+# Create backup_load_test_report.md with backup metrics
+# Save to: ${REPO_DIR}/outputs/${RUN_NAME}/backup_load_test_report.md
 ```
+
+**Important:** All reports must be inside the run directory:
+- `${OUTPUT_DIR}/backup_load_test_results.csv` - CSV report
+- `${OUTPUT_DIR}/backup_load_test_report.md` - Detailed markdown report
+- `${OUTPUT_DIR}/summary.txt` - Test suite summary (auto-generated)
+- `${OUTPUT_DIR}/logs/*.log` - Individual test logs
 
 **Detailed Markdown Report Structure** (must follow this format):
 
