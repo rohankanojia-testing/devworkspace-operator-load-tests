@@ -140,18 +140,18 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
 
         # Check for correct/incorrect in filename
         if [[ "$FILENAME" =~ _correct ]]; then
-            CONFIG_TYPE="openshift-internal correct"
+            CONFIG_TYPE="correct"
         elif [[ "$FILENAME" =~ _incorrect ]]; then
-            CONFIG_TYPE="openshift-internal incorrect"
+            CONFIG_TYPE="incorrect"
         fi
     elif [[ "$FILENAME" =~ _external ]]; then
         # External registry
         if [[ "$FILENAME" =~ _correct ]]; then
-            CONFIG_TYPE="external registry correct"
+            CONFIG_TYPE="correct"
         elif [[ "$FILENAME" =~ _incorrect ]]; then
-            CONFIG_TYPE="external registry incorrect"
+            CONFIG_TYPE="incorrect"
         else
-            CONFIG_TYPE="external registry"
+            CONFIG_TYPE="external-registry"
         fi
     fi
 
@@ -168,19 +168,11 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
         # Match both "DWOC_CONFIG_TYPE:" and "DWOC Config Type:" formats
         # Check "incorrect" first since "incorrect" contains "correct" as substring
         if grep -qE "DWOC.*(C|c)onfig.*(T|t)ype:.*incorrect" "$LOG_FILE"; then
-            if grep -qE "Registry.*Path:.*quay\.io" "$LOG_FILE"; then
-                CONFIG_TYPE="external registry incorrect"
-            else
-                CONFIG_TYPE="openshift-internal incorrect"
-            fi
+            CONFIG_TYPE="incorrect"
         elif grep -qE "DWOC.*(C|c)onfig.*(T|t)ype:.*openshift-internal" "$LOG_FILE"; then
             CONFIG_TYPE="openshift-internal"
         elif grep -qE "DWOC.*(C|c)onfig.*(T|t)ype:.*\bcorrect\b" "$LOG_FILE"; then
-            if grep -qE "Registry.*Path:.*quay\.io" "$LOG_FILE"; then
-                CONFIG_TYPE="external registry correct"
-            else
-                CONFIG_TYPE="openshift-internal correct"
-            fi
+            CONFIG_TYPE="correct"
         fi
     fi
 
