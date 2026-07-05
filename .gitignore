@@ -6,4 +6,5 @@ outputs/
 temp-certs/
 custom-ca-certificates.pem
 *.csv
+*.log
 backup.sh
