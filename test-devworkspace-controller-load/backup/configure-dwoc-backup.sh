@@ -174,9 +174,15 @@ apply_incorrect_dwoc_config() {
   local registry_secret="$2"
   local backup_schedule="${3:-*/2 * * * *}"
 
-  # Introduce typo in registry path (remove a character)
+  # Introduce typo in registry path (remove a character or use as-is if already has typo)
   local incorrect_path
-  incorrect_path=$(echo "$registry_path" | sed 's/quay\.io/quay.i/')
+  if [[ "$registry_path" == *"quay.io"* ]]; then
+    # External registry - introduce typo
+    incorrect_path=$(echo "$registry_path" | sed 's/quay\.io/quay.i/')
+  else
+    # OpenShift internal or other - use path as-is (should already have typo from caller)
+    incorrect_path="$registry_path"
+  fi
 
   log_info "Applying INCORRECT DWOC backup configuration (typo in registry path)..."
   log_info "Original registry path: ${registry_path}"
@@ -184,13 +190,28 @@ apply_incorrect_dwoc_config() {
   log_info "Registry secret: ${registry_secret}"
   log_info "Backup schedule: ${backup_schedule}"
 
-  # Ensure registry secret exists in operator namespace (use original path for secret creation)
-  create_registry_secret_if_needed "$registry_secret" "$registry_path"
+  # Only create secret if using external registry with secret specified
+  if [[ -n "$registry_secret" ]]; then
+    log_info "Registry secret specified, ensuring it exists..."
+    # Ensure registry secret exists in operator namespace (use original path for secret creation)
+    create_registry_secret_if_needed "$registry_secret" "$registry_path"
+  else
+    log_info "No registry secret specified (using ServiceAccount auth or testing incorrect path)"
+  fi
 
   if kubectl get devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" >/dev/null 2>&1; then
     # Config exists, patch it
     log_info "DevWorkspaceOperatorConfig exists, patching with incorrect config..."
-    kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type merge --patch "$(cat <<EOF
+
+    # First, remove authSecret field if it exists (in case we're switching from external to internal)
+    kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type json --patch '[
+      {"op": "remove", "path": "/config/workspace/backupCronJob/registry/authSecret"}
+    ]' 2>/dev/null || log_info "No authSecret field to remove"
+
+    # Build registry config based on whether secret is specified
+    if [[ -n "$registry_secret" ]]; then
+      # External registry with secret
+      kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type merge --patch "$(cat <<EOF
 {
   "config": {
     "workspace": {
@@ -207,10 +228,35 @@ apply_incorrect_dwoc_config() {
 }
 EOF
 )"
+    else
+      # OpenShift internal (no secret)
+      kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type merge --patch "$(cat <<EOF
+{
+  "config": {
+    "workspace": {
+      "backupCronJob": {
+        "enable": true,
+        "schedule": "${backup_schedule}",
+        "oras": {
+          "extraArgs": "--insecure"
+        },
+        "registry": {
+          "path": "${incorrect_path}"
+        }
+      }
+    }
+  }
+}
+EOF
+)"
+    fi
   else
     # Config doesn't exist, create it
     log_info "DevWorkspaceOperatorConfig not found, creating with incorrect config..."
-    kubectl apply -f - <<EOF
+
+    if [[ -n "$registry_secret" ]]; then
+      # External registry with secret
+      kubectl apply -f - <<EOF
 apiVersion: controller.devfile.io/v1alpha1
 kind: DevWorkspaceOperatorConfig
 metadata:
@@ -225,6 +271,27 @@ config:
         authSecret: ${registry_secret}
         path: ${incorrect_path}
 EOF
+    else
+      # OpenShift internal (no secret)
+      kubectl apply -f - <<EOF
+apiVersion: controller.devfile.io/v1alpha1
+kind: DevWorkspaceOperatorConfig
+metadata:
+  name: $DWO_CONFIG_NAME
+  namespace: $DWO_NAMESPACE
+config:
+  routing:
+    defaultRoutingClass: basic
+  workspace:
+    backupCronJob:
+      enable: true
+      schedule: '${backup_schedule}'
+      oras:
+        extraArgs: --insecure
+      registry:
+        path: ${incorrect_path}
+EOF
+    fi
   fi
 
   log_success "Incorrect DWOC backup configuration applied (this will cause backup failures)"
