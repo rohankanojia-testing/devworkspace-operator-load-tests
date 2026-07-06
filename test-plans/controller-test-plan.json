@@ -64,6 +64,30 @@
       "args": "--mode binary --max-vus 500 --create-automount-resources true --max-devworkspaces 500 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 2400 --test-duration-minutes 40",
       "enabled": false,
       "description": "Custom test with 500 VUs"
+    },
+    {
+      "name": "2000_single_50vus_60m",
+      "args": "--mode binary --max-vus 50 --create-automount-resources true --max-devworkspaces 2000 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 3600 --test-duration-minutes 60",
+      "enabled": false,
+      "description": "2000 DevWorkspaces single namespace with reduced VUs (50 instead of 100) - tests sustainable load vs burst capacity"
+    },
+    {
+      "name": "2500_single_50vus_120m",
+      "args": "--mode binary --max-vus 50 --create-automount-resources true --max-devworkspaces 2500 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 7200 --test-duration-minutes 120",
+      "enabled": false,
+      "description": "2500 DevWorkspaces single namespace with reduced VUs (50 instead of 100) - tests sustainable load vs burst capacity"
+    },
+    {
+      "name": "2000_single_25vus_80m",
+      "args": "--mode binary --max-vus 25 --create-automount-resources true --max-devworkspaces 2000 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 4800 --test-duration-minutes 80",
+      "enabled": false,
+      "description": "2000 DevWorkspaces single namespace with very low VUs (25) - tests optimal sustainable throughput"
+    },
+    {
+      "name": "2500_single_25vus_150m",
+      "args": "--mode binary --max-vus 25 --create-automount-resources true --max-devworkspaces 2500 --delete-devworkspace-after-ready false --separate-namespaces false --devworkspace-ready-timeout-seconds 9000 --test-duration-minutes 150",
+      "enabled": false,
+      "description": "2500 DevWorkspaces single namespace with very low VUs (25) - tests optimal sustainable throughput"
     }
   ]
 }
