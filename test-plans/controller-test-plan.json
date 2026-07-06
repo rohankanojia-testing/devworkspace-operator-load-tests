@@ -12,7 +12,7 @@
       "max_devworkspaces": 1500,
       "mode": "single",
       "duration_minutes": 40,
-      "enabled": true,
+      "enabled": false,
       "description": "1500 DevWorkspaces in single namespace"
     },
     {
@@ -33,28 +33,28 @@
       "max_devworkspaces": 1000,
       "mode": "separate",
       "duration_minutes": 40,
-      "enabled": true,
+      "enabled": false,
       "description": "1000 DevWorkspaces in separate namespaces"
     },
     {
       "max_devworkspaces": 1500,
       "mode": "separate",
       "duration_minutes": 60,
-      "enabled": true,
+      "enabled": false,
       "description": "1500 DevWorkspaces in separate namespaces"
     },
     {
       "max_devworkspaces": 2000,
       "mode": "separate",
       "duration_minutes": 90,
-      "enabled": true,
+      "enabled": false,
       "description": "2000 DevWorkspaces in separate namespaces"
     },
     {
       "max_devworkspaces": 2500,
       "mode": "separate",
       "duration_minutes": 150,
-      "enabled": true,
+      "enabled": false,
       "description": "2500 DevWorkspaces in separate namespaces"
     }
   ],
