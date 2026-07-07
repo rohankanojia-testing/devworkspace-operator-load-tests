@@ -24,14 +24,14 @@ The backup load tests verify:
   - Pushes to external registry as OCI artifacts
   - Requires registry credentials (secret)
   - **k6 success criteria**: backup Job creation and Job completion (not ImageStreamTags)
-  - Backup schedule: configurable (default: `*/2 * * * *` - every 2 minutes for testing)
+  - Backup schedule: configurable (default: `*/10 * * * *` - every 10 minutes)
 
 - **Incorrect Mode** (`incorrect`): DWOC misconfigured (for testing failure scenarios)
   - Intentionally broken registry path to test failure handling
   - Jobs will retry failed pods up to backOffLimit (typically 6 retries)
   - Test waits until jobs permanently fail or monitoring duration expires
   - Useful for testing operator behavior under failure conditions and retry logic
-  - Backup schedule: configurable (default: `*/2 * * * *`)
+  - Backup schedule: configurable (default: `*/10 * * * *`)
 
 - **OpenShift Internal Mode** (`openshift-internal`): DWOC configured to use OpenShift's internal image registry
   - Pushes to ImageStreamTags in the workspace namespace
@@ -40,7 +40,7 @@ The backup load tests verify:
   - Auto-detects the registry route or uses internal service
   - Includes `--insecure` flag for ORAS to handle self-signed certificates
   - Supports incorrect configuration by providing invalid registry path
-  - Backup schedule: configurable (default: `*/2 * * * *`)
+  - Backup schedule: configurable (default: `*/10 * * * *`)
 
 ### Restore Verification
 

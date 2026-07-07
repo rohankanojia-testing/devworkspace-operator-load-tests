@@ -320,8 +320,8 @@ Small-scale backup test for **CRC** or other resource-limited OpenShift clusters
 **Run via suite runner on CRC** (auto-skips `provision-pvs.sh`; uses CRC dynamic StorageClass):
 
 ```bash
-# Logged into CRC (oc login). Optional: faster backup cron during test
-export BACKUP_SCHEDULE="*/2 * * * *"
+# Logged into CRC (oc login). Default is */10; use */2 only for faster smoke runs
+# export BACKUP_SCHEDULE="*/2 * * * *"
 
 ./scripts/run_all_backup_loadtests.sh \
   test-plans/backup-restore-crc-openshift-internal-test-plan.json
@@ -351,7 +351,7 @@ make test_backup \
   SEPARATE_NAMESPACE=true \
   REGISTRY_PATH="" \
   REGISTRY_SECRET="" \
-  BACKUP_SCHEDULE="*/2 * * * *" \
+  BACKUP_SCHEDULE="*/10 * * * *" \
   MAX_RESTORE_SAMPLES=5
 ```
 

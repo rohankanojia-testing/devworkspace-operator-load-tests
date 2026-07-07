@@ -9,7 +9,7 @@
 # 4. Cleanup all resources
 #
 # Usage: ./backup-load-test.sh <max_devworkspaces> <backup_monitor_duration> <namespace> <dwo_namespace> <registry_path> <registry_secret> <dwoc_config_type> <separate_namespaces> [backup_schedule] [verify_restore] [max_restore_samples] [wait_for_ready] [wait_timeout]
-# Example: ./backup-load-test.sh 15 30 loadtest-devworkspaces openshift-operators "" "" openshift-internal false "*/2 * * * *" true 10 true 30
+# Example: ./backup-load-test.sh 15 30 loadtest-devworkspaces openshift-operators "" "" openshift-internal false "*/10 * * * *" true 10 true 30
 
 set -euo pipefail
 

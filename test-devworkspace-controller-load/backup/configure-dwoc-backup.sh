@@ -31,7 +31,7 @@ create_registry_secret_if_needed() {
 apply_correct_dwoc_config() {
   local registry_path="$1"
   local registry_secret="$2"
-  local backup_schedule="${3:-*/2 * * * *}"
+  local backup_schedule="${3:-*/10 * * * *}"
 
   log_info "Applying correct DWOC backup configuration (external registry)..."
   log_info "Registry path: ${registry_path}"
@@ -87,7 +87,7 @@ EOF
 # Apply DWOC configuration for OpenShift internal registry
 apply_openshift_internal_dwoc_config() {
   local registry_path="${1:-}"
-  local backup_schedule="${2:-*/2 * * * *}"
+  local backup_schedule="${2:-*/10 * * * *}"
 
   # Auto-detect OpenShift internal registry if not provided
   if [[ -z "$registry_path" ]]; then
@@ -172,7 +172,7 @@ EOF
 apply_incorrect_dwoc_config() {
   local registry_path="$1"
   local registry_secret="$2"
-  local backup_schedule="${3:-*/2 * * * *}"
+  local backup_schedule="${3:-*/10 * * * *}"
 
   # Introduce typo in registry path (remove a character or use as-is if already has typo)
   local incorrect_path
@@ -354,7 +354,7 @@ configure_dwoc_for_backup() {
   local config_type="$1"  # "correct", "incorrect", or "openshift-internal"
   local registry_path="$2"
   local registry_secret="${3:-}"
-  local backup_schedule="${4:-*/2 * * * *}"
+  local backup_schedule="${4:-*/10 * * * *}"
 
   case "$config_type" in
     correct)
@@ -390,17 +390,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "Parameters:"
     echo "  registry_path      - Container registry path (auto-detected for openshift-internal if not provided)"
     echo "  registry_secret    - Kubernetes secret name for registry auth (not used for openshift-internal)"
-    echo "  backup_schedule    - Cron schedule for backups (default: '*/2 * * * *' - every 2 minutes)"
+    echo "  backup_schedule    - Cron schedule for backups (default: '*/10 * * * *' - every 10 minutes)"
     echo ""
     echo "Examples:"
-    echo "  # External registry with default schedule (every 2 minutes)"
+    echo "  # External registry with default schedule (every 10 minutes)"
     echo "  $0 correct quay.io/username quay-push-secret"
     echo ""
     echo "  # External registry with custom schedule (every 5 minutes)"
     echo "  $0 correct quay.io/username quay-push-secret '*/5 * * * *'"
     echo ""
     echo "  # Incorrect config with custom schedule"
-    echo "  $0 incorrect quay.io/username quay-push-secret '*/2 * * * *'"
+    echo "  $0 incorrect quay.io/username quay-push-secret '*/10 * * * *'"
     echo ""
     echo "  # OpenShift internal registry (auto-detects route, default schedule)"
     echo "  $0 openshift-internal"
@@ -426,7 +426,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         log_error "Missing arguments: registry_path and registry_secret required"
         exit 1
       fi
-      apply_correct_dwoc_config "$1" "$2" "${3:-*/2 * * * *}"
+      apply_correct_dwoc_config "$1" "$2" "${3:-*/10 * * * *}"
       validate_dwoc_applied
       ;;
     incorrect)
@@ -434,12 +434,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         log_error "Missing arguments: registry_path and registry_secret required"
         exit 1
       fi
-      apply_incorrect_dwoc_config "$1" "$2" "${3:-*/2 * * * *}"
+      apply_incorrect_dwoc_config "$1" "$2" "${3:-*/10 * * * *}"
       validate_dwoc_applied
       ;;
     openshift-internal)
       # Registry path and schedule are optional - will auto-detect/use default if not provided
-      apply_openshift_internal_dwoc_config "${1:-}" "${2:-*/2 * * * *}"
+      apply_openshift_internal_dwoc_config "${1:-}" "${2:-*/10 * * * *}"
       validate_dwoc_applied
       ;;
     reset)
