@@ -46,6 +46,9 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "${REPO_ROOT}/test-devworkspace-controller-load/backup/configure-dwoc-backup.sh"
+# configure-dwoc-backup.sh sets SCRIPT_DIR to the backup/ dir; restore suite paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_DIR="${OUTPUT_DIR:-outputs}"
 RUN_DIR="$OUTPUT_DIR/backup_run_$TIMESTAMP"
