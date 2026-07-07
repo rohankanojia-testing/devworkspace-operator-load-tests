@@ -19,13 +19,14 @@ backup_metrics_extract_count() {
 
   # Formatted summary: "  ✓ workspaces_stopped .................. 500"
   local formatted
-  formatted=$(echo "$input" | grep -E "[✓✗ ] ${metric_name}[ .]+[0-9]" | head -1 | grep -oE '[0-9]+(\.[0-9]+)?$' || true)
+  formatted=$(echo "$input" | grep -E "[✓✗ ] ${metric_name}[ .]+[0-9]" | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?$' || true)
   if [[ -n "$formatted" ]]; then
     printf '%s' "${formatted%%.*}"
     return 0
   fi
+  # Legacy k6 counter with rate: "metric_name: 500 3.73/s" or "metric_name.........: 10 0.17/s"
   local legacy_counter
-  legacy_counter=$(echo "$input" | grep -E "^\s*✓?\s*✗?\s*${metric_name}" | head -1 | awk '{
+  legacy_counter=$(echo "$input" | grep -E "${metric_name}" | grep -E ':[[:space:]]*[0-9]|[0-9]+/[0-9]+/s' | tail -1 | awk '{
     for (i=1; i<=NF; i++) {
       if ($i ~ /:$/ && $(i+1) ~ /^[0-9]+(\.[0-9]+)?$/) {
         printf "%s", $(i+1)
@@ -44,7 +45,7 @@ backup_metrics_extract_count() {
   fi
 
   # Legacy gauge: "metric_name: 500 min=0 max=500"
-  legacy_counter=$(echo "$input" | grep -E "^\s*✓?\s*✗?\s*${metric_name}" | head -1 | awk '{
+  legacy_counter=$(echo "$input" | grep -E "${metric_name}" | grep -E ':[[:space:]]*[0-9]' | tail -1 | awk '{
     for (i=1; i<=NF; i++) {
       if ($i ~ /:$/ && $(i+1) ~ /^[0-9]+(\.[0-9]+)?$/) {
         printf "%s", $(i+1)
