@@ -18,6 +18,8 @@
 #   SKIP_CLEANUP              - Skip cleanup steps (default: false)
 #   RESTART_OPERATOR          - Restart DWO operator after cleanup (default: true)
 #   PROVISION_PVS             - Run provision-pvs.sh before tests (default: true; auto false on CRC)
+#   PROVISION_PV_EXTRA        - Extra PV headroom beyond max workspaces (default: MAX_RESTORE_SAMPLES or 10)
+#                               Covers parallel restore samples while originals release PVCs
 #   TEST_TIMEOUT              - Max time per test in seconds (default: 18000 = 5h)
 #   CLEANUP_MAX_WAIT          - Max time for cleanup in seconds (default: 7200 = 2h)
 #
@@ -53,6 +55,8 @@ CLEANUP_MAX_WAIT=7200   # 2 hours for cleanup
 TEST_TIMEOUT=18000      # 5 hours per test (backup tests take longer)
 SKIP_CLEANUP="${SKIP_CLEANUP:-false}"
 RESTART_OPERATOR="${RESTART_OPERATOR:-true}"
+# Headroom for restore verification (parallel samples may overlap with terminating PVCs)
+PROVISION_PV_EXTRA="${PROVISION_PV_EXTRA-${MAX_RESTORE_SAMPLES:-10}}"
 
 # Test plan file (required)
 TEST_PLAN_FILE="${1:-}"
@@ -202,6 +206,9 @@ if [ "$PROVISION_PVS_USER_SET" == "true" ]; then
 elif [ "${PROVISION_PVS_AUTO_DISABLED:-false}" == "true" ]; then
     echo "  (CRC detected — using cluster dynamic storage; set PROVISION_PVS=true to force static PVs)"
 fi
+if [ "$PROVISION_PVS" == "true" ]; then
+    echo "PV extra headroom: ${PROVISION_PV_EXTRA} (PROVISION_PV_EXTRA; default matches MAX_RESTORE_SAMPLES)"
+fi
 echo "Test timeout: ${TEST_TIMEOUT}s"
 echo "Cleanup timeout: ${CLEANUP_MAX_WAIT}s"
 echo "--------------------------------------------------------"
@@ -276,6 +283,13 @@ provision_pvs_for_test() {
     fi
 
     bash "$pv_script" "$max_workspaces"
+}
+
+calculate_pv_provision_count() {
+    local max_workspaces="$1"
+    local pv_base=$(( max_workspaces + PROVISION_PV_EXTRA ))
+    # 10% headroom before provision-pvs.sh (which applies another 10%)
+    echo $(( pv_base + (pv_base / 10) ))
 }
 
 get_max_workspaces_from_plan() {
@@ -821,13 +835,15 @@ if [ "$PROVISION_PVS" == "true" ]; then
     delete_old_pvs
 
     echo ""
-    PV_COUNT=$(get_max_workspaces_from_plan)
-    if [ "$PV_COUNT" -eq 0 ]; then
+    max_workspaces=$(get_max_workspaces_from_plan)
+    if [ "$max_workspaces" -eq 0 ]; then
         echo -e "${YELLOW}No enabled tests with --max-devworkspaces in plan; skipping PV provisioning${NC}"
     else
-        # 10% headroom (matches provision-pvs.sh)
-        PV_COUNT=$(( PV_COUNT + (PV_COUNT / 10) ))
-        echo -e "${BLUE}Pre-allocating ${PV_COUNT} PVs from test plan (max workspaces + 10%)${NC}"
+        PV_COUNT=$(calculate_pv_provision_count "$max_workspaces")
+        echo -e "${BLUE}Pre-allocating PVs from test plan:${NC}"
+        echo "  Max workspaces: ${max_workspaces}"
+        echo "  Restore headroom (PROVISION_PV_EXTRA): ${PROVISION_PV_EXTRA}"
+        echo "  Argument to provision-pvs.sh: ${PV_COUNT} (includes 10% headroom; script adds another 10%)"
         provision_pvs_for_test "$PV_COUNT"
     fi
 else

@@ -276,6 +276,29 @@ The complete backup load test (`backup-load-test.sh`) performs these phases:
 | `VERIFY_RESTORE` | Enable restore verification after backup | `true` |
 | `MAX_RESTORE_SAMPLES` | Maximum number of workspaces to restore for verification | `10` |
 
+### Suite runner PV provisioning
+
+When using `scripts/run_all_backup_loadtests.sh` with `PROVISION_PVS=true` (default on
+non-CRC clusters), PV count is derived from the test plan plus restore headroom:
+
+```
+PV base = max_devworkspaces + PROVISION_PV_EXTRA
+```
+
+`PROVISION_PV_EXTRA` defaults to `MAX_RESTORE_SAMPLES` (or `10`) so parallel restore
+samples can bind PVs while originals are still terminating. `provision-pvs.sh` applies
+an additional 10% headroom on top.
+
+```bash
+# 30 workspaces → ~48 PVs (default extra 10)
+PROVISION_PVS=true ./scripts/run_all_backup_loadtests.sh \
+  test-plans/backup-restore-crc-openshift-internal-test-plan.json
+
+# More headroom for slow PVC release at scale
+PROVISION_PV_EXTRA=20 ./scripts/run_all_backup_loadtests.sh \
+  test-plans/backup-restore-openshift-internal-test-plan.json
+```
+
 ## Metrics Collected
 
 The test collects comprehensive metrics:

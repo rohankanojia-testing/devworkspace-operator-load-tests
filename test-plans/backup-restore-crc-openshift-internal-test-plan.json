@@ -1,5 +1,5 @@
 {
-  "description": "CRC / small OpenShift cluster — OpenShift internal registry backup (30 workspaces). openshift-internal with ImageStreamTag metrics. run_all_backup_loadtests.sh auto-skips provision-pvs.sh on CRC (dynamic storage). Override: PROVISION_PVS=true",
+  "description": "CRC / small OpenShift cluster — OpenShift internal registry backup (30 workspaces). openshift-internal with ImageStreamTag metrics. run_all_backup_loadtests.sh auto-skips provision-pvs.sh on CRC (dynamic storage). Override: PROVISION_PVS=true PROVISION_PV_EXTRA=10",
   "tests": [],
   "custom_tests": [
     {

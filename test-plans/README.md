@@ -331,9 +331,15 @@ export BACKUP_SCHEDULE="*/2 * * * *"
 
 ```bash
 export PROVISION_PVS=true   # set before the script — always honored on CRC
+# Optional: extra PVs for restore verification (default: MAX_RESTORE_SAMPLES or 10)
+export PROVISION_PV_EXTRA=10
 ./scripts/run_all_backup_loadtests.sh \
   test-plans/backup-restore-crc-openshift-internal-test-plan.json
 ```
+
+`PROVISION_PV_EXTRA` adds headroom beyond `--max-devworkspaces` so parallel restore
+samples can bind PVs while originals are still terminating. For 30 workspaces with the
+default extra of 10, the suite provisions ~48 PVs (vs ~36 without extra).
 
 **Run a single test directly:**
 
