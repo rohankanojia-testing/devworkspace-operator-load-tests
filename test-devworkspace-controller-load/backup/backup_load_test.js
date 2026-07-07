@@ -1326,7 +1326,8 @@ export function handleSummary(data) {
   };
 
   if (!inCluster) {
-    backupLoadTestSummaryReport['backup-load-test-report.html'] = htmlReport(filteredData, {
+    // htmlReport requires full k6 data (http_req_*, data_received, etc.)
+    backupLoadTestSummaryReport['backup-load-test-report.html'] = htmlReport(data, {
       title: 'DevWorkspace Backup Load Test Report',
     });
   }
