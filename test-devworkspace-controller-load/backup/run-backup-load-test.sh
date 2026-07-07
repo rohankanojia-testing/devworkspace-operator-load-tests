@@ -461,9 +461,41 @@ cleanup_devworkspaces() {
   fi
 }
 
+delete_separate_namespaces() {
+  if [[ "$SEPARATE_NAMESPACES" != "true" ]]; then
+    return 0
+  fi
+
+  local ns_list count
+  ns_list=$(kubectl get ns -o json 2>/dev/null | \
+    jq -r '.items[].metadata.name | select(test("^load-test-ns-"))' 2>/dev/null || true)
+
+  if [[ -z "$ns_list" ]]; then
+    log_info "No load-test-ns-* namespaces to delete"
+    return 0
+  fi
+
+  count=$(echo "$ns_list" | wc -l | tr -d ' ')
+  log_info "Deleting ${count} separate namespaces (ImageStreams first)..."
+
+  while IFS= read -r ns; do
+    [[ -z "$ns" ]] && continue
+    kubectl delete imagestreams --all -n "$ns" --ignore-not-found --wait=false 2>/dev/null || true
+    kubectl delete ns "$ns" --ignore-not-found --wait=false 2>/dev/null || true
+  done <<< "$ns_list"
+
+  log_success "Initiated deletion of ${count} separate namespaces"
+}
+
 delete_namespace() {
+  if [[ "$SEPARATE_NAMESPACES" == "true" ]]; then
+    delete_separate_namespaces
+    return 0
+  fi
+
   log_info "Deleting namespace: ${LOAD_TEST_NAMESPACE}"
-  kubectl delete namespace "${LOAD_TEST_NAMESPACE}" --ignore-not-found --wait=false >/dev/null 2>&1
+  kubectl delete imagestreams --all -n "${LOAD_TEST_NAMESPACE}" --ignore-not-found --wait=false 2>/dev/null || true
+  kubectl delete namespace "${LOAD_TEST_NAMESPACE}" --ignore-not-found --wait=false 2>/dev/null || true
   log_success "Namespace deletion initiated"
 }
 

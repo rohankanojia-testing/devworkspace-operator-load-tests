@@ -303,6 +303,59 @@ get_max_workspaces_from_plan() {
 
 
 ########################################
+# LOAD-TEST IMAGESTREAMTAG CLEANUP     #
+########################################
+count_load_test_imagestreamtags() {
+    local count
+    count=$(kubectl get imagestreamtags -A -o json 2>/dev/null | jq '[.items[] | select(
+      .metadata.namespace == "loadtest-devworkspaces" or
+      (.metadata.namespace | test("^load-test-ns-"))
+    )] | length' 2>/dev/null || echo "0")
+    if [[ -z "$count" || "$count" == "null" ]]; then
+        echo "0"
+    else
+        echo "$count"
+    fi
+}
+
+delete_imagestreams_in_namespace() {
+    local ns="${1}"
+    [[ -z "$ns" ]] && return 0
+    kubectl delete imagestreams --all -n "$ns" --ignore-not-found --wait=false 2>/dev/null || true
+}
+
+delete_load_test_namespaces() {
+    local ns_list ns
+
+    ns_list=$(kubectl get ns -o json 2>/dev/null | jq -r '.items[] | select(
+      .metadata.name == "loadtest-devworkspaces" or
+      (.metadata.name | test("^load-test-ns-")) or
+      (.metadata.labels["load-test"] == "test-type")
+    ) | .metadata.name' 2>/dev/null | sort -u || true)
+
+    while IFS= read -r ns; do
+        [[ -z "$ns" ]] && continue
+        delete_imagestreams_in_namespace "$ns"
+        kubectl delete ns "$ns" --ignore-not-found --wait=false 2>/dev/null || true
+    done <<< "$ns_list"
+}
+
+count_load_test_namespaces() {
+    local count
+    count=$(kubectl get ns -o json 2>/dev/null | jq '[.items[] | select(
+      .metadata.name == "loadtest-devworkspaces" or
+      (.metadata.name | test("^load-test-ns-")) or
+      (.metadata.labels["load-test"] == "test-type")
+    ) | .metadata.name] | unique | length' 2>/dev/null || echo "0")
+    if [[ -z "$count" || "$count" == "null" ]]; then
+        echo "0"
+    else
+        echo "$count"
+    fi
+}
+
+
+########################################
 # WAIT FOR COMPLETE CLEANUP CONDITIONS #
 ########################################
 wait_for_cleanup() {
@@ -314,9 +367,9 @@ wait_for_cleanup() {
     echo -e "${BLUE}Waiting for environment cleanup...${NC}"
     echo "Conditions:"
     echo "  1) No DevWorkspaces anywhere (we'll delete leftovers)"
-    echo "  2) Namespace 'loadtest-devworkspaces' absent"
-    echo "  3) No namespace with label load-test=test-type (we'll delete leftovers)"
-    echo "  4) No backup jobs (we'll delete leftovers)"
+    echo "  2) No load-test namespaces (load-test-ns-*, loadtest-devworkspaces, labeled)"
+    echo "  3) No backup jobs (we'll delete leftovers)"
+    echo "  4) No ImageStreamTags in load-test namespaces (backup artifacts)"
     echo "--------------------------------------------------------"
 
     local start_time=$(date +%s)
@@ -329,6 +382,9 @@ wait_for_cleanup() {
 
         if [ $elapsed -gt $CLEANUP_MAX_WAIT ]; then
             echo -e "${RED}ERROR: Cleanup did not finish within $CLEANUP_MAX_WAIT seconds${NC}"
+            local final_ist
+            final_ist=$(count_load_test_imagestreamtags)
+            echo -e "${RED}  Remaining load-test ImageStreamTags: ${final_ist}${NC}"
             return 1
         fi
 
@@ -338,9 +394,9 @@ wait_for_cleanup() {
 
         local dw_count=0
         if [[ -n "$dw_list" ]] && ! echo "$dw_list" | grep -qi "No resources found"; then
-            dw_count=$(echo "$dw_list" | wc -l)
+            dw_count=$(echo "$dw_list" | wc -l | tr -d ' ')
             echo -e "${YELLOW}Found $dw_count leftover DevWorkspaces. Deleting...${NC}"
-            echo "$dw_list" | awk '{print $2, $1}' | while read dw ns; do
+            echo "$dw_list" | awk '{print $2, $1}' | while read -r dw ns; do
                 if [[ -n "$dw" && -n "$ns" ]]; then
                     echo "  Deleting DevWorkspace $dw in namespace $ns..."
                     kubectl delete dw "$dw" -n "$ns" --wait=false 2>/dev/null || true
@@ -353,9 +409,9 @@ wait_for_cleanup() {
         backup_jobs_list=$(kubectl get jobs --all-namespaces -l devworkspace.devfile.io/backup-job=true --no-headers 2>/dev/null || true)
         local backup_jobs_count=0
         if [[ -n "$backup_jobs_list" ]]; then
-            backup_jobs_count=$(echo "$backup_jobs_list" | wc -l)
+            backup_jobs_count=$(echo "$backup_jobs_list" | wc -l | tr -d ' ')
             echo -e "${YELLOW}Found $backup_jobs_count leftover backup jobs. Deleting...${NC}"
-            echo "$backup_jobs_list" | awk '{print $2, $1}' | while read job ns; do
+            echo "$backup_jobs_list" | awk '{print $2, $1}' | while read -r job ns; do
                 if [[ -n "$job" && -n "$ns" ]]; then
                     echo "  Deleting job $job in namespace $ns..."
                     kubectl delete job "$job" -n "$ns" --wait=false 2>/dev/null || true
@@ -363,32 +419,39 @@ wait_for_cleanup() {
             done
         fi
 
-        # --- Delete leftover labeled namespaces ---
-        local labeled_ns_list
-        labeled_ns_list=$(kubectl get ns -l load-test=test-type --no-headers 2>/dev/null || true)
-        local labeled_ns_count=0
-        if [[ -n "$labeled_ns_list" ]]; then
-            labeled_ns_count=$(echo "$labeled_ns_list" | wc -l)
-            echo -e "${YELLOW}Found $labeled_ns_count leftover labeled namespaces. Deleting...${NC}"
-            echo "$labeled_ns_list" | awk '{print $1}' | while read ns; do
-                if [[ -n "$ns" ]]; then
-                    echo "  Deleting namespace $ns..."
-                    kubectl delete ns "$ns" --wait=false 2>/dev/null || true
-                fi
-            done
+        # --- Delete load-test namespaces (and ImageStreams within them) ---
+        local load_test_ns_count
+        load_test_ns_count=$(count_load_test_namespaces)
+        if [ "$load_test_ns_count" -gt 0 ]; then
+            echo -e "${YELLOW}Found $load_test_ns_count load-test namespace(s). Deleting (ImageStreams first)...${NC}"
+            delete_load_test_namespaces
         fi
 
-        # --- Delete specific test namespace if exists ---
-        local ns_exists=0
-        if kubectl get ns loadtest-devworkspaces --no-headers 2>/dev/null | grep -q loadtest-devworkspaces; then
-            ns_exists=1
-            echo -e "${YELLOW}Found loadtest-devworkspaces namespace. Deleting...${NC}"
-            kubectl delete ns loadtest-devworkspaces --wait=false 2>/dev/null || true
+        # --- Delete stray ImageStreamTags if namespaces are gone but tags remain ---
+        local ist_count
+        ist_count=$(count_load_test_imagestreamtags)
+        if [ "$ist_count" -gt 0 ]; then
+            echo -e "${YELLOW}Found $ist_count load-test ImageStreamTag(s). Deleting parent ImageStreams...${NC}"
+            local ist_ns_list
+            ist_ns_list=$(kubectl get imagestreamtags -A -o json 2>/dev/null | jq -r '
+              [.items[] | select(
+                .metadata.namespace == "loadtest-devworkspaces" or
+                (.metadata.namespace | test("^load-test-ns-"))
+              ) | .metadata.namespace] | unique | .[]' 2>/dev/null || true)
+            while IFS= read -r ns; do
+                delete_imagestreams_in_namespace "$ns"
+            done <<< "$ist_ns_list"
         fi
+
+        # Re-count after deletion attempts
+        load_test_ns_count=$(count_load_test_namespaces)
+        ist_count=$(count_load_test_imagestreamtags)
 
         # --- All conditions satisfied ---
-        if [ "$dw_count" -eq 0 ] && [ "$ns_exists" -eq 0 ] && [ "$labeled_ns_count" -eq 0 ] && [ "$backup_jobs_count" -eq 0 ]; then
+        if [ "$dw_count" -eq 0 ] && [ "$load_test_ns_count" -eq 0 ] && \
+           [ "$backup_jobs_count" -eq 0 ] && [ "$ist_count" -eq 0 ]; then
             echo -e "${GREEN}Cleanup complete after ${elapsed}s (${cleanup_attempt} attempts)${NC}"
+            echo -e "${GREEN}  ImageStreamTags in load-test namespaces: 0${NC}"
             echo "--------------------------------------------------------"
 
             # Restart operator if requested
@@ -411,8 +474,8 @@ wait_for_cleanup() {
         echo "Cleanup attempt #${cleanup_attempt} (elapsed ${elapsed}s):"
         echo "  - DevWorkspaces: $dw_count"
         echo "  - Backup jobs: $backup_jobs_count"
-        echo "  - loadtest-devworkspaces ns: $ns_exists"
-        echo "  - labeled namespaces: $labeled_ns_count"
+        echo "  - Load-test namespaces: $load_test_ns_count"
+        echo "  - Load-test ImageStreamTags: $ist_count"
 
         echo "Retrying in ${POLL_INTERVAL}s..."
         sleep $POLL_INTERVAL
@@ -589,11 +652,20 @@ run_backup_test() {
     echo "Log saved: $TEST_LOG"
     echo "--------------------------------------------------------"
 
-    # Cleanup after test
+    # Cleanup after test — ensure ImageStreamTags are gone before the next test
     echo ""
-    echo -e "${BLUE}Running post-test cleanup...${NC}"
+    if [ "$test_status" == "PASSED" ]; then
+        echo -e "${BLUE}Running post-test cleanup (waiting for ImageStreamTags to be removed)...${NC}"
+    else
+        echo -e "${BLUE}Running post-test cleanup...${NC}"
+    fi
     if ! wait_for_cleanup; then
-        echo -e "${YELLOW}WARNING: Post-test cleanup failed, but continuing...${NC}"
+        if [ "$test_status" == "PASSED" ]; then
+            echo -e "${RED}ERROR: Post-test cleanup failed — ImageStreamTags or load-test namespaces may remain${NC}"
+            echo -e "${RED}         Next test may see stale backup artifacts. Fix cluster state before continuing.${NC}"
+        else
+            echo -e "${YELLOW}WARNING: Post-test cleanup failed, but continuing...${NC}"
+        fi
     fi
 
     return $exit_code

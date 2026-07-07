@@ -521,10 +521,11 @@ function monitorBackupCompletionWithImageStreamTags(maxWaitMinutes, pollInterval
   while (attempts < maxAttempts) {
     const newlyMarked = updateBackedUpFromImageStreamTags();
     const backedUpCount = countBackedUpWorkspaces();
-    const jobs = getBackupJobs();
 
-    updateBackupJobMetrics(jobs, backedUpCount);
     updateImageStreamTagMetrics(backedUpCount, backupStatusMap.size);
+    if (backupStatusMap.size > 0) {
+      backupSuccessRate.add(backedUpCount / backupStatusMap.size);
+    }
 
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     const progress = ((backedUpCount / backupStatusMap.size) * 100).toFixed(1);
@@ -559,6 +560,11 @@ function monitorBackupCompletionWithImageStreamTags(maxWaitMinutes, pollInterval
 }
 
 function updateBackupJobMetrics(jobs, backedUpCount) {
+  // openshift-internal uses ImageStreamTags as the durable success signal; skip job metrics.
+  if (useImageStreamTagBackup) {
+    return;
+  }
+
   let currentRunning = 0;
 
   for (const job of jobs) {
@@ -633,22 +639,17 @@ function updateBackupJobMetrics(jobs, backedUpCount) {
   backupJobsPerWorkspace.add(avgJobsPerWorkspace);
   backupMaxJobsPerWorkspace.add(maxJobsForAnyWorkspace);
 
-  if (useImageStreamTagBackup && backupStatusMap.size > 0) {
-    backupSuccessRate.add(backedUpCount / backupStatusMap.size);
-  } else if (totalJobsSeen > 0) {
+  if (totalJobsSeen > 0) {
     backupSuccessRate.add(totalSucceededJobs / totalJobsSeen);
   }
 
-  const backedUpLabel = useImageStreamTagBackup
-    ? `imageStreamTags=${backedUpCount}/${backupStatusMap.size}`
-    : `backedUp=${backedUpCount}/${backupStatusMap.size}`;
   console.log(
     `Jobs: total=${totalJobsSeen}, ` +
     `succeeded=${totalSucceededJobs}, ` +
     `failed=${totalFailedJobs} (perm=${totalPermanentlyFailedJobs}), ` +
     `running=${currentRunning}, ` +
     `pods=${cumulativePodCount}, ` +
-    `${backedUpLabel}, ` +
+    `backedUp=${backedUpCount}/${backupStatusMap.size}, ` +
     `jobs/ws=${avgJobsPerWorkspace.toFixed(2)} (max=${maxJobsForAnyWorkspace})`,
   );
 }
@@ -807,12 +808,8 @@ function verifyBackupImageStreamTags(devWorkspaces) {
 }
 
 function collectFinalMetrics() {
-  // Get current job state
-  const jobs = getBackupJobs();
-
-  // Count backed up workspaces from map
   let backedUpCount = 0;
-  for (const [name, info] of backupStatusMap) {
+  for (const [, info] of backupStatusMap) {
     if (info.backed_up) {
       backedUpCount++;
     }
@@ -820,7 +817,21 @@ function collectFinalMetrics() {
 
   if (useImageStreamTagBackup) {
     updateImageStreamTagMetrics(backedUpCount, backupStatusMap.size);
+    console.log("\n======================================");
+    console.log("Final Backup Metrics (ImageStreamTags)");
+    console.log("======================================");
+    console.log(`ImageStreamTags (${BACKUP_IMAGE_STREAM_TAG}): ${backedUpCount}/${backupStatusMap.size}`);
+    if (backupStatusMap.size > 0) {
+      const successRate = ((backedUpCount / backupStatusMap.size) * 100).toFixed(2);
+      console.log(`Backup Success Rate: ${successRate}%`);
+      backupSuccessRate.add(backedUpCount / backupStatusMap.size);
+    }
+    console.log("======================================\n");
+    return;
   }
+
+  // External registry modes: report ephemeral Job metrics
+  const jobs = getBackupJobs();
 
   // Calculate job stats
   let succeededJobs = 0;
@@ -880,10 +891,6 @@ function collectFinalMetrics() {
   if (backupStatusMap.size > 0) {
     const successRate = ((backedUpCount / backupStatusMap.size) * 100).toFixed(2);
     console.log(`Backup Success Rate: ${successRate}%`);
-    if (useImageStreamTagBackup) {
-      backupSuccessRate.add(backedUpCount / backupStatusMap.size);
-      console.log(`ImageStreamTags (${BACKUP_IMAGE_STREAM_TAG}): ${backedUpCount}/${backupStatusMap.size}`);
-    }
   }
   console.log("======================================\n");
 

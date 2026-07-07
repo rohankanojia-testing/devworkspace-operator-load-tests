@@ -35,7 +35,7 @@ The backup load tests verify:
 
 - **OpenShift Internal Mode** (`openshift-internal`): DWOC configured to use OpenShift's internal image registry
   - Pushes to ImageStreamTags in the workspace namespace
-  - **k6 success criteria**: `ImageStreamTag` `<workspace-name>:latest` per workspace (Jobs are tracked for ops metrics only)
+  - **k6 success criteria**: `ImageStreamTag` `<workspace-name>:latest` per workspace (backup Jobs are not polled — they are ephemeral and misleading after TTL cleanup)
   - Uses service account token for authentication (no secret required)
   - Auto-detects the registry route or uses internal service
   - Includes `--insecure` flag for ORAS to handle self-signed certificates
@@ -281,11 +281,16 @@ The complete backup load test (`backup-load-test.sh`) performs these phases:
 The test collects comprehensive metrics:
 
 ### Backup Metrics
-- `backup_jobs_total` - Total backup jobs created across all namespaces
-- `backup_pods_total` - Total backup pods created (includes all retry attempts; e.g., a job with 6 retries creates 7 pods total)
-- `backup_jobs_succeeded` - Successfully completed backup jobs
-- `backup_jobs_failed` - Jobs that permanently failed (hit backOffLimit, not just first pod failure)
-- `backup_jobs_running` - Currently running/pending backup jobs (includes jobs actively retrying)
+
+For **`openshift-internal`**, pass/fail and live monitoring use **ImageStreamTag** metrics only (`imagestreamtags_*`, `imagestreams_*`). Backup Job metrics are not polled (Jobs are ephemeral and misleading after TTL cleanup).
+
+For **external registry** modes (`correct` / `incorrect`), Job metrics drive success detection.
+
+- `backup_jobs_total` - Total backup jobs created across all namespaces (external registry modes only)
+- `backup_pods_total` - Total backup pods created (external registry modes only)
+- `backup_jobs_succeeded` - Successfully completed backup jobs (external registry modes only)
+- `backup_jobs_failed` - Jobs that permanently failed (hit backOffLimit) (external registry modes only)
+- `backup_jobs_running` - Currently running/pending backup jobs (external registry modes only)
 - `backup_success_rate` - Percentage of successful backups
 - `backup_job_duration` - Time taken for backup jobs to complete
 - `workspaces_backed_up` - Number of workspaces successfully backed up
