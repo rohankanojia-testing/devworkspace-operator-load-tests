@@ -379,3 +379,163 @@ export function createFilteredSummaryData(data, allowedMetrics) {
     }
     return filteredData;
 }
+
+function getSummaryMetric(data, name) {
+    const metric = data.metrics?.[name];
+    if (!metric?.values) {
+        return null;
+    }
+    const values = metric.values;
+    if (metric.type === 'counter') {
+        return { type: 'counter', count: values.count, rate: values.rate };
+    }
+    if (metric.type === 'gauge') {
+        return { type: 'gauge', value: values.value, min: values.min, max: values.max };
+    }
+    if (metric.type === 'trend') {
+        return {
+            type: 'trend',
+            avg: values.avg,
+            min: values.min,
+            max: values.max,
+            med: values.med,
+            'p(90)': values['p(90)'],
+            'p(95)': values['p(95)'],
+        };
+    }
+    return null;
+}
+
+function metricThresholdOk(data, name) {
+    const metric = data.metrics?.[name];
+    if (!metric?.thresholds) {
+        return null;
+    }
+    const results = Object.values(metric.thresholds);
+    if (results.length === 0) {
+        return null;
+    }
+    return results.every((t) => t.ok);
+}
+
+function formatThresholdMark(data, name) {
+    const ok = metricThresholdOk(data, name);
+    if (ok === null) {
+        return ' ';
+    }
+    return ok ? '✓' : '✗';
+}
+
+function formatCountLine(data, name, label) {
+    const m = getSummaryMetric(data, name);
+    if (!m) {
+        return null;
+    }
+    const count = m.type === 'counter' ? m.count : m.value;
+    return `  ${formatThresholdMark(data, name)} ${label.padEnd(34)} ${count}`;
+}
+
+function formatGaugeLine(data, name, label, { asPercent = false } = {}) {
+    const m = getSummaryMetric(data, name);
+    if (!m) {
+        return null;
+    }
+    let display = m.value;
+    if (asPercent) {
+        display = `${(m.value * 100).toFixed(2)}%`;
+    }
+    return `  ${formatThresholdMark(data, name)} ${label.padEnd(34)} ${display}`;
+}
+
+function formatTrendLine(data, name, label, unit = '') {
+    const m = getSummaryMetric(data, name);
+    if (!m) {
+        return null;
+    }
+    const suffix = unit ? ` ${unit}` : '';
+    return `    ${label.padEnd(34)} avg=${m.avg}${suffix}  min=${m.min}  med=${m.med}  max=${m.max}`;
+}
+
+/**
+ * Human-readable backup load test summary (replaces raw k6 textSummary for clarity).
+ * @param {Object} data - k6 handleSummary data
+ * @param {Object} options
+ * @param {boolean} options.useImageStreamTagBackup - openshift-internal mode
+ * @param {boolean} options.verifyRestore - include restore section
+ */
+export function formatBackupMetricsSummary(data, options = {}) {
+    const { useImageStreamTagBackup = false, verifyRestore = true } = options;
+    const lines = [
+        '',
+        '======================================',
+        'Backup Load Test - Metrics Summary',
+        '======================================',
+        useImageStreamTagBackup
+            ? 'Mode: openshift-internal (ImageStreamTag backup tracking)'
+            : 'Mode: external registry (Job-based backup tracking)',
+        '',
+    ];
+
+    lines.push('--- Backup ---');
+    const backupLines = [
+        formatCountLine(data, 'workspaces_stopped', 'workspaces_stopped'),
+        formatCountLine(data, 'workspaces_backed_up', 'workspaces_backed_up'),
+    ];
+    if (useImageStreamTagBackup) {
+        const backedUp = getSummaryMetric(data, 'imagestreamtags_backed_up');
+        const total = getSummaryMetric(data, 'imagestreamtags_total');
+        if (backedUp && total) {
+            const mark = formatThresholdMark(data, 'imagestreamtags_backed_up');
+            lines.push(`  ${mark} imagestreamtags_backed_up .............. ${backedUp.value} / ${total.value}`);
+        }
+        backupLines.push(
+            formatGaugeLine(data, 'imagestreamtag_success_rate', 'imagestreamtag_success_rate', { asPercent: true }),
+            formatGaugeLine(data, 'backup_success_rate', 'backup_success_rate', { asPercent: true }),
+        );
+        // Legacy CSV counters — show count only, not rate
+        const istCreated = getSummaryMetric(data, 'imagestreams_created');
+        const istExpected = getSummaryMetric(data, 'imagestreams_expected');
+        if (istCreated && istExpected) {
+            lines.push(`    imagestreams_created (CSV) .......... ${istCreated.count} / ${istExpected.count}`);
+        }
+    } else {
+        backupLines.push(
+            formatCountLine(data, 'backup_jobs_total', 'backup_jobs_total'),
+            formatCountLine(data, 'backup_jobs_succeeded', 'backup_jobs_succeeded'),
+            formatCountLine(data, 'backup_jobs_failed', 'backup_jobs_failed'),
+            formatCountLine(data, 'backup_pods_total', 'backup_pods_total'),
+            formatGaugeLine(data, 'backup_success_rate', 'backup_success_rate', { asPercent: true }),
+        );
+        const jobDuration = formatTrendLine(data, 'backup_job_duration', 'backup_job_duration', 'ms');
+        if (jobDuration) {
+            backupLines.push(jobDuration);
+        }
+    }
+    backupLines.filter(Boolean).forEach((line) => lines.push(line));
+
+    if (verifyRestore) {
+        lines.push('', '--- Restore ---');
+        [
+            formatCountLine(data, 'restore_workspaces_total', 'restore_workspaces_total'),
+            formatCountLine(data, 'restore_workspaces_succeeded', 'restore_workspaces_succeeded'),
+            formatCountLine(data, 'restore_workspaces_failed', 'restore_workspaces_failed'),
+            formatGaugeLine(data, 'restore_success_rate', 'restore_success_rate', { asPercent: true }),
+            formatTrendLine(data, 'restore_duration', 'restore_duration', 'ms'),
+        ].filter(Boolean).forEach((line) => lines.push(line));
+    }
+
+    lines.push('', '--- System ---');
+    [
+        formatTrendLine(data, 'average_operator_cpu', 'average_operator_cpu', 'milliCPU'),
+        formatTrendLine(data, 'average_operator_memory', 'average_operator_memory', 'MiB'),
+        formatCountLine(data, 'operator_cpu_violations', 'operator_cpu_violations'),
+        formatCountLine(data, 'operator_mem_violations', 'operator_mem_violations'),
+        formatCountLine(data, 'operator_pod_restarts_total', 'operator_pod_restarts_total'),
+        formatTrendLine(data, 'average_etcd_cpu', 'average_etcd_cpu', 'milliCPU'),
+        formatTrendLine(data, 'average_etcd_memory', 'average_etcd_memory', 'MiB'),
+        formatCountLine(data, 'etcd_pod_restarts_total', 'etcd_pod_restarts_total'),
+    ].filter(Boolean).forEach((line) => lines.push(line));
+
+    lines.push('', '======================================', '');
+    return lines.join('\n');
+}

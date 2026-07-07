@@ -513,9 +513,9 @@ extract_metrics() {
         echo ""
 
         # Extract backup metrics
-        if grep -q "backup_jobs_total" "$LOG_FILE"; then
+        if grep -q "backup_jobs_total\|imagestreamtags_backed_up\|Backup Load Test - Metrics Summary" "$LOG_FILE"; then
             echo "--- Backup Metrics ---"
-            grep "backup_jobs_total\|backup_jobs_succeeded\|backup_jobs_failed\|backup_success_rate\|workspaces_backed_up\|imagestreamtags_backed_up\|imagestreamtags_total\|imagestreamtag_success_rate\|imagestreams_created\|imagestreams_expected" "$LOG_FILE" | tail -30 || true
+            grep "backup_jobs_total\|backup_jobs_succeeded\|backup_jobs_failed\|backup_success_rate\|workspaces_backed_up\|workspaces_stopped\|imagestreamtags_backed_up\|imagestreamtags_total\|imagestreamtag_success_rate\|imagestreams_created\|imagestreams_expected" "$LOG_FILE" | tail -30 || true
             echo ""
         fi
 

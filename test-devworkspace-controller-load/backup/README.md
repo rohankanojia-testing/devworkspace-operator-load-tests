@@ -305,7 +305,7 @@ The test collects comprehensive metrics:
 
 ### Backup Metrics
 
-For **`openshift-internal`**, pass/fail and live monitoring use **ImageStreamTag** metrics only (`imagestreamtags_*`, `imagestreams_*`). Backup Job metrics are not polled (Jobs are ephemeral and misleading after TTL cleanup).
+For **`openshift-internal`**, pass/fail and live monitoring use **ImageStreamTag** metrics only (`imagestreamtags_*`). Backup Job metrics are not polled (Jobs are ephemeral and misleading after TTL cleanup). The k6 stdout summary uses a formatted **Metrics Summary** section (not raw k6 counter rates).
 
 For **external registry** modes (`correct` / `incorrect`), Job metrics drive success detection.
 

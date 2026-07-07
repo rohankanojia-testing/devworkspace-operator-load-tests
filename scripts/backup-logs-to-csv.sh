@@ -135,9 +135,15 @@ for log_file in "$LOGS_DIR"/*.log; do
     backup_success_rate=$(extract_gauge "$log_content" "backup_success_rate")
     backup_job_duration=$(extract_avg "$log_content" "backup_job_duration")
 
-    # Extract ImageStream metrics
+    # Extract ImageStream metrics (prefer ImageStreamTag gauges; fall back to legacy counters)
     imagestreams_created=$(extract_counter "$log_content" "imagestreams_created")
     imagestreams_expected=$(extract_counter "$log_content" "imagestreams_expected")
+    if [ "$imagestreams_created" = "0" ]; then
+        imagestreams_created=$(echo "$log_content" | grep -E 'imagestreamtags_backed_up' | grep -oE '[0-9]+ / [0-9]+' | head -1 | awk '{print $1}' || echo "0")
+    fi
+    if [ "$imagestreams_expected" = "0" ]; then
+        imagestreams_expected=$(echo "$log_content" | grep -E 'imagestreamtags_backed_up' | grep -oE '[0-9]+ / [0-9]+' | head -1 | awk '{print $3}' || echo "0")
+    fi
 
     # Extract restore metrics
     restore_total=$(extract_counter "$log_content" "restore_workspaces_total")

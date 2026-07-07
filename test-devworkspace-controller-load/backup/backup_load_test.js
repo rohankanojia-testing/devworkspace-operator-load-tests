@@ -18,7 +18,6 @@ import {sleep} from 'k6';
 import {Trend, Counter, Gauge} from 'k6/metrics';
 import encoding from 'k6/encoding';
 import {htmlReport} from "https://raw.githubusercontent.com/benc-uk/k6-reporter/main/dist/bundle.js";
-import {textSummary} from "https://jslib.k6.io/k6-summary/0.0.1/index.js";
 import {
   getDevWorkspacesFromApiServer,
   createAuthHeaders,
@@ -26,6 +25,7 @@ import {
   checkDevWorkspaceOperatorMetrics,
   checkEtcdMetrics,
   createFilteredSummaryData,
+  formatBackupMetricsSummary,
 } from '../../common/utils.js';
 
 const inCluster = __ENV.IN_CLUSTER === 'true';
@@ -522,11 +522,6 @@ function monitorBackupCompletionWithImageStreamTags(maxWaitMinutes, pollInterval
     const newlyMarked = updateBackedUpFromImageStreamTags();
     const backedUpCount = countBackedUpWorkspaces();
 
-    updateImageStreamTagMetrics(backedUpCount, backupStatusMap.size);
-    if (backupStatusMap.size > 0) {
-      backupSuccessRate.add(backedUpCount / backupStatusMap.size);
-    }
-
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     const progress = ((backedUpCount / backupStatusMap.size) * 100).toFixed(1);
 
@@ -798,7 +793,6 @@ function verifyBackupImageStreamTags(devWorkspaces) {
 
   imageStreamsCreated.add(imageStreamTagCount);
   imageStreamsExpected.add(devWorkspaces.length);
-  updateImageStreamTagMetrics(imageStreamTagCount, devWorkspaces.length);
 
   console.log(`\nImageStreamTag Coverage: ${imageStreamTagCount}/${devWorkspaces.length} (tag: ${BACKUP_IMAGE_STREAM_TAG})`);
 
@@ -1245,7 +1239,7 @@ function verifyWorkspaceRestore(backedUpWorkspaces) {
 }
 
 export function handleSummary(data) {
-  const allowedMetrics = [
+  const jobMetrics = [
     'backup_jobs_total',
     'backup_jobs_succeeded',
     'backup_jobs_failed',
@@ -1254,15 +1248,21 @@ export function handleSummary(data) {
     'backup_pods_total',
     'backup_jobs_per_workspace',
     'backup_max_jobs_per_workspace',
-    'workspaces_stopped',
-    'workspaces_backed_up',
-    'backup_success_rate',
     'backup_job_duration',
+  ];
+
+  const imageStreamTagMetrics = [
     'imagestreamtags_backed_up',
     'imagestreamtags_total',
     'imagestreamtag_success_rate',
     'imagestreams_created',
     'imagestreams_expected',
+  ];
+
+  const commonMetrics = [
+    'workspaces_stopped',
+    'workspaces_backed_up',
+    'backup_success_rate',
     'restore_workspaces_total',
     'restore_workspaces_succeeded',
     'restore_workspaces_failed',
@@ -1275,18 +1275,25 @@ export function handleSummary(data) {
     'operator_pod_restarts_total',
     'etcd_pod_restarts_total',
     'average_etcd_cpu',
-    'average_etcd_memory'
+    'average_etcd_memory',
   ];
+
+  const allowedMetrics = useImageStreamTagBackup
+    ? [...commonMetrics, ...imageStreamTagMetrics]
+    : [...commonMetrics, ...jobMetrics];
 
   const filteredData = createFilteredSummaryData(data, allowedMetrics);
 
   let backupLoadTestSummaryReport = {
-    stdout: textSummary(filteredData, {indent: ' ', enableColors: true})
-  }
+    stdout: formatBackupMetricsSummary(filteredData, {
+      useImageStreamTagBackup,
+      verifyRestore,
+    }),
+  };
 
   if (!inCluster) {
-    backupLoadTestSummaryReport["backup-load-test-report.html"] = htmlReport(data, {
-      title: "DevWorkspace Backup Load Test Report",
+    backupLoadTestSummaryReport['backup-load-test-report.html'] = htmlReport(filteredData, {
+      title: 'DevWorkspace Backup Load Test Report',
     });
   }
 
