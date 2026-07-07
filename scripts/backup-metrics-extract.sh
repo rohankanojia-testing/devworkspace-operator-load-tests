@@ -119,8 +119,9 @@ backup_metrics_map_legacy_csv() {
   BACKUP_FAILED=$(backup_metrics_extract_count "$input" "backup_jobs_failed")
   BACKUP_JOB_DURATION=$(backup_metrics_extract_avg "$input" "backup_job_duration")
 
-  # openshift-internal: use ImageStreamTag counts for attempted/succeeded when job totals are absent
-  if [[ "$config_type" == *"openshift-internal"* ]] && [[ "${BACKUP_ATTEMPTED:-0}" -eq 0 ]]; then
+  # openshift-internal: Backup Attempted/Succeeded/Failed use ImageStreamTags (pass/fail signal).
+  # Job pod counts and duration remain informational from backup_jobs_* metrics.
+  if [[ "$config_type" == *"openshift-internal"* ]]; then
     local ist_ratio backed_up expected
     ist_ratio=$(backup_metrics_extract_imagestreamtags "$input")
     if [[ -n "$ist_ratio" ]]; then
@@ -132,11 +133,9 @@ backup_metrics_map_legacy_csv() {
       BACKUP_ATTEMPTED=$(backup_metrics_extract_count "$input" "workspaces_stopped")
       BACKUP_SUCCEEDED=$(backup_metrics_extract_count "$input" "workspaces_backed_up")
     fi
-    if [[ "${BACKUP_FAILED:-0}" -eq 0 ]]; then
-      BACKUP_FAILED=$(( BACKUP_ATTEMPTED - BACKUP_SUCCEEDED ))
-      if [[ "$BACKUP_FAILED" -lt 0 ]]; then
-        BACKUP_FAILED=0
-      fi
+    BACKUP_FAILED=$(( BACKUP_ATTEMPTED - BACKUP_SUCCEEDED ))
+    if [[ "$BACKUP_FAILED" -lt 0 ]]; then
+      BACKUP_FAILED=0
     fi
   fi
 

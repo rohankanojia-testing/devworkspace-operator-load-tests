@@ -317,7 +317,7 @@ The test collects comprehensive metrics:
 
 ### Backup Metrics
 
-For **`openshift-internal`**, pass/fail uses **ImageStreamTag** metrics (`imagestreamtags_*`). Ephemeral **backup Job** metrics (pods, duration, job counts) are still collected during monitoring and shown under **Backup Jobs (informational)** in the Metrics Summary and CSV.
+For **`openshift-internal`**, pass/fail uses **ImageStreamTag** metrics (`imagestreamtags_*`). CSV columns **Backup Attempted**, **Backup Succeeded**, and **Backup Failed** map from ImageStreamTag counts; **Backup Pods** and **Backup Job Duration** remain informational from ephemeral backup Jobs.
 
 For **external registry** modes (`correct` / `incorrect`), Job metrics drive success detection.
 
