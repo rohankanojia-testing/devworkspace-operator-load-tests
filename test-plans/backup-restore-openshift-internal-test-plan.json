@@ -55,6 +55,12 @@
       "args": "--mode binary --max-vus 250 --max-devworkspaces 1500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 50 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path \"default-route-openshift-image-registry.example.com/typo\" --registry-secret \"\" --backup-wait-minutes 60",
       "enabled": true,
       "description": "1500 workspaces - Separate namespaces + OpenShift internal registry + Incorrect config (typo in path)"
+    },
+    {
+      "name": "backup_2500_separate_ns_internal_incorrect",
+      "args": "--mode binary --max-vus 350 --max-devworkspaces 2500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 70 --run-backup-test-hook true --dwoc-config-type incorrect --registry-path \"default-route-openshift-image-registry.example.com/typo\" --registry-secret \"\" --backup-wait-minutes 80",
+      "enabled": true,
+      "description": "2500 workspaces - Separate namespaces + OpenShift internal registry + Incorrect config (typo in path)"
     }
   ]
 }
