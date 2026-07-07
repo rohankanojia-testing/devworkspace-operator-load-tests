@@ -492,12 +492,20 @@ export function formatBackupMetricsSummary(data, options = {}) {
             formatGaugeLine(data, 'imagestreamtag_success_rate', 'imagestreamtag_success_rate', { asPercent: true }),
             formatGaugeLine(data, 'backup_success_rate', 'backup_success_rate', { asPercent: true }),
         );
-        // Legacy CSV counters — show count only, not rate
         const istCreated = getSummaryMetric(data, 'imagestreams_created');
         const istExpected = getSummaryMetric(data, 'imagestreams_expected');
         if (istCreated && istExpected) {
             lines.push(`    imagestreams_created (CSV) .......... ${istCreated.count} / ${istExpected.count}`);
         }
+
+        lines.push('', '--- Backup Jobs (informational) ---');
+        [
+            formatCountLine(data, 'backup_jobs_total', 'backup_jobs_total'),
+            formatCountLine(data, 'backup_jobs_succeeded', 'backup_jobs_succeeded'),
+            formatCountLine(data, 'backup_jobs_failed', 'backup_jobs_failed'),
+            formatCountLine(data, 'backup_pods_total', 'backup_pods_total'),
+            formatTrendLine(data, 'backup_job_duration', 'backup_job_duration', 'ms'),
+        ].filter(Boolean).forEach((line) => lines.push(line));
     } else {
         backupLines.push(
             formatCountLine(data, 'backup_jobs_total', 'backup_jobs_total'),

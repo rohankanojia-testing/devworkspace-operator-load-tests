@@ -61,6 +61,7 @@ const seenJobUids = new Set();  // Track which jobs we've already processed
 const totalPodsCreated = new Map();  // Track cumulative pod count per job UID
 const jobsPerWorkspaceId = new Map();  // workspace_id -> count of jobs created for that workspace
 const permanentlyFailedJobUids = new Set();  // Track jobs that hit Failed=True condition
+const completedJobUidsForDuration = new Set();  // Track jobs already recorded in backup_job_duration
 
 export const options = {
   scenarios: {
@@ -540,6 +541,10 @@ function monitorBackupCompletionWithImageStreamTags(maxWaitMinutes, pollInterval
       checkSystemEtcdMetrics();
     }
 
+    // Collect ephemeral Job metrics (pods, duration) for reporting; IST remains pass/fail signal
+    const jobs = getBackupJobs();
+    updateBackupJobMetrics(jobs, backedUpCount, { informationalOnly: true });
+
     sleep(pollIntervalSeconds);
     attempts++;
   }
@@ -552,14 +557,38 @@ function monitorBackupCompletionWithImageStreamTags(maxWaitMinutes, pollInterval
   }
 
   console.log("\n📊 Monitoring finished");
+
+  const finalJobs = getBackupJobs();
+  updateBackupJobMetrics(finalJobs, countBackedUpWorkspaces(), { informationalOnly: true });
 }
 
-function updateBackupJobMetrics(jobs, backedUpCount) {
-  // openshift-internal uses ImageStreamTags as the durable success signal; skip job metrics.
-  if (useImageStreamTagBackup) {
-    return;
-  }
+function recordJobDurations(jobs) {
+  for (const job of jobs) {
+    const jobUid = job.metadata?.uid;
+    if (!jobUid || completedJobUidsForDuration.has(jobUid)) {
+      continue;
+    }
 
+    const status = job.status || {};
+    if (status.succeeded !== 1) {
+      continue;
+    }
+
+    const startTime = status.startTime;
+    const completionTime = status.completionTime;
+    if (!startTime || !completionTime) {
+      continue;
+    }
+
+    completedJobUidsForDuration.add(jobUid);
+    const duration = new Date(completionTime).getTime() - new Date(startTime).getTime();
+    backupJobDuration.add(duration);
+  }
+}
+
+function updateBackupJobMetrics(jobs, backedUpCount, options = {}) {
+  const informationalOnly = options.informationalOnly === true;
+  const quietLogging = options.quietLogging === true || informationalOnly;
   let currentRunning = 0;
 
   for (const job of jobs) {
@@ -634,19 +663,23 @@ function updateBackupJobMetrics(jobs, backedUpCount) {
   backupJobsPerWorkspace.add(avgJobsPerWorkspace);
   backupMaxJobsPerWorkspace.add(maxJobsForAnyWorkspace);
 
-  if (totalJobsSeen > 0) {
+  if (!informationalOnly && totalJobsSeen > 0) {
     backupSuccessRate.add(totalSucceededJobs / totalJobsSeen);
   }
 
-  console.log(
-    `Jobs: total=${totalJobsSeen}, ` +
-    `succeeded=${totalSucceededJobs}, ` +
-    `failed=${totalFailedJobs} (perm=${totalPermanentlyFailedJobs}), ` +
-    `running=${currentRunning}, ` +
-    `pods=${cumulativePodCount}, ` +
-    `backedUp=${backedUpCount}/${backupStatusMap.size}, ` +
-    `jobs/ws=${avgJobsPerWorkspace.toFixed(2)} (max=${maxJobsForAnyWorkspace})`,
-  );
+  recordJobDurations(jobs);
+
+  if (!quietLogging) {
+    console.log(
+      `Jobs: total=${totalJobsSeen}, ` +
+      `succeeded=${totalSucceededJobs}, ` +
+      `failed=${totalFailedJobs} (perm=${totalPermanentlyFailedJobs}), ` +
+      `running=${currentRunning}, ` +
+      `pods=${cumulativePodCount}, ` +
+      `backedUp=${backedUpCount}/${backupStatusMap.size}, ` +
+      `jobs/ws=${avgJobsPerWorkspace.toFixed(2)} (max=${maxJobsForAnyWorkspace})`,
+    );
+  }
 }
 
 function countJobSucceededBackups(jobs) {
@@ -811,6 +844,10 @@ function collectFinalMetrics() {
 
   if (useImageStreamTagBackup) {
     updateImageStreamTagMetrics(backedUpCount, backupStatusMap.size);
+    const jobs = getBackupJobs();
+    updateBackupJobMetrics(jobs, backedUpCount, { informationalOnly: true });
+    recordJobDurations(jobs);
+
     console.log("\n======================================");
     console.log("Final Backup Metrics (ImageStreamTags)");
     console.log("======================================");
@@ -820,6 +857,13 @@ function collectFinalMetrics() {
       console.log(`Backup Success Rate: ${successRate}%`);
       backupSuccessRate.add(backedUpCount / backupStatusMap.size);
     }
+
+    let cumulativePodCount = 0;
+    for (const count of totalPodsCreated.values()) {
+      cumulativePodCount += count;
+    }
+    console.log(`Backup Jobs Seen (informational): ${seenJobUids.size}`);
+    console.log(`Backup Pods (informational): ${cumulativePodCount}`);
     console.log("======================================\n");
     return;
   }
@@ -916,18 +960,8 @@ function collectFinalMetrics() {
     console.log("");
   }
 
-  // Calculate backup job durations
-  for (const job of jobs) {
-    const startTime = job.status?.startTime;
-    const completionTime = job.status?.completionTime;
-
-    if (startTime && completionTime) {
-      const start = new Date(startTime).getTime();
-      const end = new Date(completionTime).getTime();
-      const duration = end - start;
-      backupJobDuration.add(duration);
-    }
-  }
+  // Calculate backup job durations for any jobs still in the API
+  recordJobDurations(jobs);
 }
 
 function checkOperatorMetrics() {
@@ -1279,7 +1313,7 @@ export function handleSummary(data) {
   ];
 
   const allowedMetrics = useImageStreamTagBackup
-    ? [...commonMetrics, ...imageStreamTagMetrics]
+    ? [...commonMetrics, ...imageStreamTagMetrics, ...jobMetrics]
     : [...commonMetrics, ...jobMetrics];
 
   const filteredData = createFilteredSummaryData(data, allowedMetrics);

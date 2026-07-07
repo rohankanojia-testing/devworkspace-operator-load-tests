@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=backup-metrics-extract.sh
+source "${SCRIPT_DIR}/backup-metrics-extract.sh"
+
 # Parse k6 backup load test output and convert metrics to CSV
 #
 # Usage: cat k6-backup-output.txt | ./backup-output-to-csv.sh --config-type "external registry correct" --dw-target 2500
@@ -44,52 +48,7 @@ fi
 # Read input
 INPUT=$(cat)
 
-# Extract just the avg value from a metric
-extract_avg() {
-    local metric_name="$1"
-    local result
-    result=$(echo "$INPUT" | grep -E "^\s*✓?\s*✗?\s*$metric_name" | awk '{
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /^avg=/) {
-                print substr($i, 5)
-                exit
-            }
-        }
-    }' || echo "")
-    echo "${result:-0}"
-}
-
-# Extract counter values
-extract_counter() {
-    local counter_name="$1"
-    local result
-    result=$(echo "$INPUT" | grep -E "^\s*✓?\s*✗?\s*$counter_name" | awk '{
-        # Look for the count value (first number before rate)
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /^[0-9]+$/ && $(i+1) ~ /^[0-9.]+\/s$/) {
-                print $i
-                exit
-            }
-        }
-    }' || echo "")
-    echo "${result:-0}"
-}
-
-# Extract gauge values
-extract_gauge() {
-    local gauge_name="$1"
-    local result
-    result=$(echo "$INPUT" | grep -E "^\s*✓?\s*✗?\s*$gauge_name" | awk '{
-        # Look for value=X pattern
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /^value=/) {
-                print substr($i, 7)
-                exit
-            }
-        }
-    }' || echo "")
-    echo "${result:-0}"
-}
+backup_metrics_map_legacy_csv "$INPUT" "$CONFIG_TYPE"
 
 # Check if CSV file exists, if not create header
 CSV_FILE="backup_load_test_results.csv"
@@ -97,29 +56,6 @@ CSV_FILE="backup_load_test_results.csv"
 if [ ! -f "$CSV_FILE" ]; then
     echo "Config Type,DW Target,Backup Attempted,Backup Succeeded,Backup Pods,Backup Failed,Backup Job Duration (Avg ms),Restore Total,Restore Succeeded,Restore Failed,Restore Duration (Avg ms),Average CPU (milliCPU),Average Memory (MiB),Average Etcd CPU (milliCPU),Average Etcd Memory (MiB)" > "$CSV_FILE"
 fi
-
-# Extract backup metrics
-BACKUP_ATTEMPTED=$(extract_counter "backup_jobs_total")
-BACKUP_SUCCEEDED=$(extract_counter "backup_jobs_succeeded")
-BACKUP_PODS=$(extract_counter "backup_pods_total")
-BACKUP_FAILED=$(extract_counter "backup_jobs_failed")
-BACKUP_JOB_DURATION=$(extract_avg "backup_job_duration")
-
-# Extract restore metrics
-RESTORE_TOTAL=$(extract_counter "restore_workspaces_total")
-RESTORE_SUCCEEDED=$(extract_counter "restore_workspaces_succeeded")
-RESTORE_FAILED=$(extract_counter "restore_workspaces_failed")
-RESTORE_DURATION=$(extract_avg "restore_duration")
-
-# Extract operator metrics
-AVG_OP_CPU=$(extract_avg "average_operator_cpu")
-AVG_OP_MEM=$(extract_avg "average_operator_memory")
-
-# Extract ETCD metrics
-AVG_ETCD_CPU=$(extract_avg "average_etcd_cpu")
-AVG_ETCD_MEM=$(extract_avg "average_etcd_memory")
-
-# Build CSV row
 CSV_ROW="$CONFIG_TYPE,$DW_TARGET,$BACKUP_ATTEMPTED,$BACKUP_SUCCEEDED,$BACKUP_PODS,$BACKUP_FAILED,$BACKUP_JOB_DURATION,$RESTORE_TOTAL,$RESTORE_SUCCEEDED,$RESTORE_FAILED,$RESTORE_DURATION,$AVG_OP_CPU,$AVG_OP_MEM,$AVG_ETCD_CPU,$AVG_ETCD_MEM"
 
 # Append to CSV

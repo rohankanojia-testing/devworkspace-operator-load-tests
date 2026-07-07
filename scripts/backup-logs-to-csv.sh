@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=backup-metrics-extract.sh
+source "${SCRIPT_DIR}/backup-metrics-extract.sh"
+
 # Read backup test logs from a directory and generate CSV report
 #
 # Usage: ./backup-logs-to-csv.sh <logs-directory>
@@ -22,41 +26,35 @@ fi
 
 # Extract just the avg value from a metric (Trend)
 extract_avg() {
-    local input="$1"
-    local metric_name="$2"
-    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$metric_name" | awk '{
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /^avg=/) {
-                print substr($i, 5)
-                exit
-            }
-        }
-        print "0"
-    }' || echo "0"
+    backup_metrics_extract_avg "$1" "$2"
 }
 
-# Extract counter values
+# Extract counter or formatted-summary count
 extract_counter() {
-    local input="$1"
-    local counter_name="$2"
-    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$counter_name" | awk '{
-        # Look for the count value (first number before rate)
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /^[0-9]+$/ && $(i+1) ~ /^[0-9.]+\/s$/) {
-                print $i
-                exit
-            }
-        }
-        print "0"
-    }' || echo "0"
+    backup_metrics_extract_count "$1" "$2"
 }
 
-# Extract gauge values (current value)
+# Extract gauge values (percentages and final values)
 extract_gauge() {
     local input="$1"
     local gauge_name="$2"
+    # Formatted summary percentage: "imagestreamtag_success_rate ......... 100.00%"
+    local pct
+    pct=$(echo "$input" | grep -E "[✓✗ ] ${gauge_name}[ .]+[0-9]+%" | head -1 | grep -oE '[0-9.]+%' | tr -d '%' || true)
+    if [[ -n "$pct" ]]; then
+        # CSV stores rate as 0-1 fraction for some gauges; keep raw percent value for display
+        echo "$pct"
+        return 0
+    fi
+    # Formatted plain value
+    local val
+    val=$(echo "$input" | grep -E "[✓✗ ] ${gauge_name}[ .]+[0-9]" | head -1 | grep -oE '[0-9.]+$' || true)
+    if [[ -n "$val" ]]; then
+        echo "$val"
+        return 0
+    fi
+    # Legacy k6 gauge
     echo "$input" | grep -E "^\s*✓?\s*✗?\s*$gauge_name" | awk '{
-        # Gauge shows just the final value
         for (i=1; i<=NF; i++) {
             if ($i ~ /^[0-9.]+$/ && $(i-1) !~ /^value=/) {
                 print $i
@@ -122,27 +120,44 @@ for log_file in "$LOGS_DIR"/*.log; do
     metadata=$(parse_test_name "$test_name")
     IFS='|' read -r target namespace registry_type config_type <<< "$metadata"
 
-    # Read log file content
-    log_content=$(cat "$log_file")
+    # Read log file content (strip ANSI)
+    log_content=$(backup_metrics_strip_ansi < "$log_file")
+
+    # openshift-internal in filename → use internal config for job→IST mapping
+    local_config_type="$config_type"
+    if echo "$test_name" | grep -q '_internal'; then
+        local_config_type="openshift-internal"
+    fi
 
     # Extract backup metrics
-    backup_jobs_total=$(extract_counter "$log_content" "backup_jobs_total")
-    backup_jobs_succeeded=$(extract_counter "$log_content" "backup_jobs_succeeded")
-    backup_jobs_failed=$(extract_counter "$log_content" "backup_jobs_failed")
-    backup_pods_total=$(extract_counter "$log_content" "backup_pods_total")
-    workspaces_stopped=$(extract_counter "$log_content" "workspaces_stopped")
-    workspaces_backed_up=$(extract_counter "$log_content" "workspaces_backed_up")
+    backup_jobs_total=$(backup_metrics_extract_count "$log_content" "backup_jobs_total")
+    backup_jobs_succeeded=$(backup_metrics_extract_count "$log_content" "backup_jobs_succeeded")
+    backup_jobs_failed=$(backup_metrics_extract_count "$log_content" "backup_jobs_failed")
+    backup_pods_total=$(backup_metrics_extract_count "$log_content" "backup_pods_total")
+    if [[ "$local_config_type" == "openshift-internal" && "${backup_jobs_total:-0}" -eq 0 ]]; then
+        ist_ratio=$(backup_metrics_extract_imagestreamtags "$log_content")
+        if [[ -n "$ist_ratio" ]]; then
+            backup_jobs_succeeded=$(echo "$ist_ratio" | awk '{print $1}')
+            backup_jobs_total=$(echo "$ist_ratio" | awk '{print $3}')
+            backup_jobs_failed=$(( backup_jobs_total - backup_jobs_succeeded ))
+            [[ "$backup_jobs_failed" -lt 0 ]] && backup_jobs_failed=0
+        fi
+    fi
+
+    workspaces_stopped=$(backup_metrics_extract_count "$log_content" "workspaces_stopped")
+    workspaces_backed_up=$(backup_metrics_extract_count "$log_content" "workspaces_backed_up")
     backup_success_rate=$(extract_gauge "$log_content" "backup_success_rate")
     backup_job_duration=$(extract_avg "$log_content" "backup_job_duration")
 
-    # Extract ImageStream metrics (prefer ImageStreamTag gauges; fall back to legacy counters)
-    imagestreams_created=$(extract_counter "$log_content" "imagestreams_created")
-    imagestreams_expected=$(extract_counter "$log_content" "imagestreams_expected")
+    # Extract ImageStream metrics
+    imagestreams_created=$(backup_metrics_extract_count "$log_content" "imagestreams_created")
+    imagestreams_expected=$(backup_metrics_extract_count "$log_content" "imagestreams_expected")
     if [ "$imagestreams_created" = "0" ]; then
-        imagestreams_created=$(echo "$log_content" | grep -E 'imagestreamtags_backed_up' | grep -oE '[0-9]+ / [0-9]+' | head -1 | awk '{print $1}' || echo "0")
-    fi
-    if [ "$imagestreams_expected" = "0" ]; then
-        imagestreams_expected=$(echo "$log_content" | grep -E 'imagestreamtags_backed_up' | grep -oE '[0-9]+ / [0-9]+' | head -1 | awk '{print $3}' || echo "0")
+        ist_ratio=$(backup_metrics_extract_imagestreamtags "$log_content")
+        if [[ -n "$ist_ratio" ]]; then
+            imagestreams_created=$(echo "$ist_ratio" | awk '{print $1}')
+            imagestreams_expected=$(echo "$ist_ratio" | awk '{print $3}')
+        fi
     fi
 
     # Extract restore metrics
@@ -159,8 +174,8 @@ for log_file in "$LOGS_DIR"/*.log; do
     avg_etcd_mem=$(extract_avg "$log_content" "average_etcd_memory")
     op_cpu_viol=$(extract_counter "$log_content" "operator_cpu_violations")
     op_mem_viol=$(extract_counter "$log_content" "operator_mem_violations")
-    op_pod_restarts=$(extract_gauge "$log_content" "operator_pod_restarts_total")
-    etcd_pod_restarts=$(extract_gauge "$log_content" "etcd_pod_restarts_total")
+    op_pod_restarts=$(extract_counter "$log_content" "operator_pod_restarts_total")
+    etcd_pod_restarts=$(extract_counter "$log_content" "etcd_pod_restarts_total")
 
     # Print CSV row
     echo "$test_name,$target,$namespace,$registry_type,$config_type,$backup_jobs_total,$backup_jobs_succeeded,$backup_jobs_failed,$backup_pods_total,$workspaces_stopped,$workspaces_backed_up,$backup_success_rate,$backup_job_duration,$imagestreams_created,$imagestreams_expected,$restore_total,$restore_succeeded,$restore_failed,$restore_success_rate,$restore_duration,$avg_op_cpu,$avg_op_mem,$avg_etcd_cpu,$avg_etcd_mem,$op_cpu_viol,$op_mem_viol,$op_pod_restarts,$etcd_pod_restarts"

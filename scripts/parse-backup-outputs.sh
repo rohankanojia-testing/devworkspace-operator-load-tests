@@ -7,6 +7,8 @@ set -eo pipefail
 #        ./parse-backup-outputs.sh outputs/backup_run_20260520_150000
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=backup-metrics-extract.sh
+source "${SCRIPT_DIR}/backup-metrics-extract.sh"
 
 # Check arguments
 if [[ $# -lt 1 ]]; then
@@ -55,44 +57,17 @@ else
     echo "Appending to existing CSV file: $CSV_FILE"
 fi
 
-# Function to extract avg value from metric
+# Function to extract avg value from metric (legacy; prefer backup-metrics-extract.sh)
 extract_avg() {
-    local input="$1"
-    local metric_name="$2"
-    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$metric_name" | head -1 | awk '{
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /^avg=/) {
-                printf "%s", substr($i, 5)
-                exit
-            }
-        }
-        printf "0"
-    }'
+    backup_metrics_extract_avg "$1" "$2"
 }
 
-# Function to extract counter values
-# Handles two formats:
-#   1. Counter with rate: "metric_name: value rate/s" (e.g., "imagestreams_created: 25 0.17591/s")
-#   2. Gauge: "metric_name: value min=X max=Y" (e.g., "backup_jobs_succeeded: 25 min=0 max=25")
+# Function to extract counter values (legacy; prefer backup-metrics-extract.sh)
 extract_counter() {
-    local input="$1"
-    local counter_name="$2"
-    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$counter_name" | head -1 | awk '{
-        # Find the field after the metric name (which ends with :)
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /:$/) {
-                # Next field should be the value
-                if ($(i+1) ~ /^[0-9]+(\.[0-9]+)?$/) {
-                    printf "%s", $(i+1)
-                    exit
-                }
-            }
-        }
-        printf "0"
-    }'
+    backup_metrics_extract_count "$1" "$2"
 }
 
-# Function to extract gauge values
+# Legacy gauge extractor (kept for compatibility)
 extract_gauge() {
     local input="$1"
     local gauge_name="$2"
@@ -181,28 +156,9 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     CONFIG_TYPE=${CONFIG_TYPE:-unknown}
 
     # Read log content and strip ANSI color codes
-    INPUT=$(cat "$LOG_FILE" | sed 's/\x1b\[[0-9;]*m//g')
+    INPUT=$(backup_metrics_strip_ansi < "$LOG_FILE")
 
-    # Extract backup metrics
-    BACKUP_ATTEMPTED=$(extract_counter "$INPUT" "backup_jobs_total" || echo "0")
-    BACKUP_SUCCEEDED=$(extract_counter "$INPUT" "backup_jobs_succeeded" || echo "0")
-    BACKUP_PODS=$(extract_counter "$INPUT" "backup_pods_total" || echo "0")
-    BACKUP_FAILED=$(extract_counter "$INPUT" "backup_jobs_failed" || echo "0")
-    BACKUP_JOB_DURATION=$(extract_avg "$INPUT" "backup_job_duration" || echo "0")
-
-    # Extract restore metrics
-    RESTORE_TOTAL=$(extract_counter "$INPUT" "restore_workspaces_total" || echo "0")
-    RESTORE_SUCCEEDED=$(extract_counter "$INPUT" "restore_workspaces_succeeded" || echo "0")
-    RESTORE_FAILED=$(extract_counter "$INPUT" "restore_workspaces_failed" || echo "0")
-    RESTORE_DURATION=$(extract_avg "$INPUT" "restore_duration" || echo "0")
-
-    # Extract operator metrics
-    AVG_OP_CPU=$(extract_avg "$INPUT" "average_operator_cpu" || echo "0")
-    AVG_OP_MEM=$(extract_avg "$INPUT" "average_operator_memory" || echo "0")
-
-    # Extract ETCD metrics
-    AVG_ETCD_CPU=$(extract_avg "$INPUT" "average_etcd_cpu" || echo "0")
-    AVG_ETCD_MEM=$(extract_avg "$INPUT" "average_etcd_memory" || echo "0")
+    backup_metrics_map_legacy_csv "$INPUT" "$CONFIG_TYPE"
 
     # Set defaults if empty
     BACKUP_ATTEMPTED=${BACKUP_ATTEMPTED:-0}
@@ -222,6 +178,8 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     # Check if any metrics were found
     if [[ "$BACKUP_ATTEMPTED" == "0" && "$BACKUP_SUCCEEDED" == "0" && "$AVG_OP_CPU" == "0" ]]; then
         echo "  ⚠️  Warning: No metrics found in log file (test may have failed or incomplete)"
+    elif backup_metrics_is_formatted_summary "$INPUT"; then
+        echo "  ℹ️  Parsed formatted Metrics Summary"
     fi
 
     # Build CSV row
