@@ -19,7 +19,7 @@
 #   RESTART_OPERATOR          - Restart DWO operator after cleanup (default: true)
 #   PROVISION_PVS             - Run provision-pvs.sh before tests (default: true; auto false on CRC)
 #   PROVISION_PV_EXTRA        - Extra PV headroom beyond max workspaces (default: MAX_RESTORE_SAMPLES or 10)
-#                               Covers parallel restore samples while originals release PVCs
+#   BACKUP_SCHEDULE           - Cron override; unset = auto-scale by --max-devworkspaces (10/15/25 min)
 #   TEST_TIMEOUT              - Max time per test in seconds (default: 18000 = 5h)
 #   CLEANUP_MAX_WAIT          - Max time for cleanup in seconds (default: 7200 = 2h)
 #
@@ -45,6 +45,7 @@ set -o pipefail
 # --- Configuration ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "${REPO_ROOT}/test-devworkspace-controller-load/backup/configure-dwoc-backup.sh"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_DIR="${OUTPUT_DIR:-outputs}"
 RUN_DIR="$OUTPUT_DIR/backup_run_$TIMESTAMP"
@@ -567,9 +568,13 @@ parse_backup_args() {
         REGISTRY_SECRET=$(echo "$args" | grep -oP '(?<=--registry-secret )\S+' || echo "")
     fi
 
-    # Extract backup schedule if specified (handle quoted values with space)
-    BACKUP_SCHEDULE=$(echo "$args" | grep -oP "(?<=--backup-schedule )['\"]?[^'\"]+['\"]?" || echo "*/10 * * * *")
-    BACKUP_SCHEDULE=$(echo "$BACKUP_SCHEDULE" | tr -d '"' | tr -d "'")
+    # Backup schedule: explicit --backup-schedule in args, else scale by workspace count
+    if echo "$args" | grep -qP '--backup-schedule '; then
+        BACKUP_SCHEDULE=$(echo "$args" | grep -oP "(?<=--backup-schedule )['\"]?[^'\"]+['\"]?" || true)
+        BACKUP_SCHEDULE=$(echo "$BACKUP_SCHEDULE" | tr -d '"' | tr -d "'")
+    else
+        BACKUP_SCHEDULE=$(backup_schedule_for_workspaces "$MAX_DEVWORKSPACES")
+    fi
 
     # Remove quotes from registry path and secret if present (only if non-empty)
     REGISTRY_PATH=$(echo "$REGISTRY_PATH" | tr -d '"')

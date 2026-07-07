@@ -24,7 +24,7 @@ test_webhook_load:
 
 # Backup load testing
 # DWOC_CONFIG_TYPE: "correct" (default), "incorrect" (for testing failure scenarios), or "openshift-internal"
-# BACKUP_SCHEDULE: Cron schedule for backups (default: "*/10 * * * *" - every 10 minutes)
+# BACKUP_SCHEDULE: Cron schedule for backups; unset or "auto" = scale by MAX_DEVWORKSPACES
 # VERIFY_RESTORE: Enable restore verification after backup (default: "true")
 # MAX_RESTORE_SAMPLES: Maximum number of workspaces to restore for verification (default: 10)
 # WAIT_FOR_READY: Wait for all DevWorkspaces to be ready before backup (default: "true")
@@ -39,7 +39,7 @@ test_backup:
 		"$(REGISTRY_SECRET)" \
 		$(or $(DWOC_CONFIG_TYPE),openshift-internal) \
 		$(or $(SEPARATE_NAMESPACE),false) \
-		"$(or $(BACKUP_SCHEDULE),*/10 * * * *)" \
+		"$(if $(BACKUP_SCHEDULE),$(BACKUP_SCHEDULE),auto)" \
 		$(or $(VERIFY_RESTORE),true) \
 		$(or $(MAX_RESTORE_SAMPLES),10) \
 		$(or $(WAIT_FOR_READY),true) \

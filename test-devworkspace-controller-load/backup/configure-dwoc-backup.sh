@@ -10,6 +10,22 @@ log_warning() { echo -e "⚠️  $*" >&2; }
 DWO_CONFIG_NAME="${DWO_CONFIG_NAME:-devworkspace-operator-config}"
 DWO_NAMESPACE="${DWO_NAMESPACE:-openshift-operators}"
 
+# Return cron schedule scaled to workspace count.
+# < 1000: every 10m; 1000-2000: every 15m; > 2000: every 25m
+backup_schedule_for_workspaces() {
+  local workspaces="${1:-0}"
+  if ! [[ "$workspaces" =~ ^[0-9]+$ ]]; then
+    workspaces=0
+  fi
+  if [[ "$workspaces" -gt 2000 ]]; then
+    echo "*/25 * * * *"
+  elif [[ "$workspaces" -ge 1000 ]]; then
+    echo "*/15 * * * *"
+  else
+    echo "*/10 * * * *"
+  fi
+}
+
 # Source the setup-backup-secret.sh script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/setup-backup-secret.sh"

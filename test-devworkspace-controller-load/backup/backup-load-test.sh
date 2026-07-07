@@ -9,11 +9,12 @@
 # 4. Cleanup all resources
 #
 # Usage: ./backup-load-test.sh <max_devworkspaces> <backup_monitor_duration> <namespace> <dwo_namespace> <registry_path> <registry_secret> <dwoc_config_type> <separate_namespaces> [backup_schedule] [verify_restore] [max_restore_samples] [wait_for_ready] [wait_timeout]
-# Example: ./backup-load-test.sh 15 30 loadtest-devworkspaces openshift-operators "" "" openshift-internal false "*/10 * * * *" true 10 true 30
+# Example: ./backup-load-test.sh 15 30 loadtest-devworkspaces openshift-operators "" "" openshift-internal false auto true 10 true 30
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/configure-dwoc-backup.sh"
 
 # Configuration from arguments
 MAX_DEVWORKSPACES=${1:-15}
@@ -24,7 +25,14 @@ REGISTRY_PATH=${5:-}
 REGISTRY_SECRET=${6:-}
 DWOC_CONFIG_TYPE=${7:-openshift-internal}
 SEPARATE_NAMESPACE=${8:-false}
-BACKUP_SCHEDULE="${9:-*/10 * * * *}"
+BACKUP_SCHEDULE_ARG="${9:-auto}"
+if [[ -n "${BACKUP_SCHEDULE:-}" && "${BACKUP_SCHEDULE}" != "auto" ]]; then
+  :
+elif [[ "$BACKUP_SCHEDULE_ARG" != "auto" && -n "$BACKUP_SCHEDULE_ARG" ]]; then
+  BACKUP_SCHEDULE="$BACKUP_SCHEDULE_ARG"
+else
+  BACKUP_SCHEDULE=$(backup_schedule_for_workspaces "$MAX_DEVWORKSPACES")
+fi
 VERIFY_RESTORE="${10:-true}"
 MAX_RESTORE_SAMPLES="${11:-10}"
 WAIT_FOR_READY="${12:-true}"
@@ -55,7 +63,6 @@ echo ""
 echo "Phase 1: Configuring DWOC for Backup"
 echo "========================================"
 
-source "${SCRIPT_DIR}/configure-dwoc-backup.sh"
 configure_dwoc_for_backup "$DWOC_CONFIG_TYPE" "$REGISTRY_PATH" "$REGISTRY_SECRET" "$BACKUP_SCHEDULE"
 echo ""
 

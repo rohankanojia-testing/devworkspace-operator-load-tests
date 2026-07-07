@@ -169,6 +169,18 @@ make test_backup \
   SEPARATE_NAMESPACE=true
 ```
 
+### Backup Schedule (auto-scaled by default)
+
+When `BACKUP_SCHEDULE` is unset or `auto`, the cron interval scales with workspace count:
+
+| Workspaces | Schedule | Interval |
+|------------|----------|----------|
+| &lt; 1000 | `*/10 * * * *` | 10 minutes |
+| 1000–2000 | `*/15 * * * *` | 15 minutes |
+| &gt; 2000 | `*/25 * * * *` | 25 minutes |
+
+Applied automatically by `backup-load-test.sh` and `run_all_backup_loadtests.sh`.
+
 ### Custom Backup Schedule
 
 Control when backups run using a custom cron schedule:
@@ -272,7 +284,7 @@ The complete backup load test (`backup-load-test.sh`) performs these phases:
 | `REGISTRY_SECRET` | Secret name for registry auth | `quay-push-secret` |
 | `DWOC_CONFIG_TYPE` | DWOC config mode: `correct`, `incorrect`, or `openshift-internal` | `correct` |
 | `SEPARATE_NAMESPACE` | Use separate namespaces per workspace | `false` |
-| `BACKUP_SCHEDULE` | Cron schedule for backup jobs | `*/10 * * * *` |
+| `BACKUP_SCHEDULE` | Cron schedule for backup jobs | auto: `*/10` (&lt;1000 ws), `*/15` (1000–2000), `*/25` (&gt;2000) |
 | `VERIFY_RESTORE` | Enable restore verification after backup | `true` |
 | `MAX_RESTORE_SAMPLES` | Maximum number of workspaces to restore for verification | `10` |
 
