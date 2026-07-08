@@ -17,7 +17,7 @@
 #   OUTPUT_DIR                - Base directory for outputs (default: outputs/)
 #   SKIP_CLEANUP              - Skip cleanup steps (default: false)
 #   RESTART_OPERATOR          - Restart DWO operator after cleanup (default: true)
-#   PROVISION_PVS             - Run provision-pvs.sh before tests (default: true; auto false on CRC)
+#   PROVISION_PVS             - Re-provision PVs before each test (default: true; auto false on CRC)
 #   PROVISION_PV_EXTRA        - Extra PV headroom beyond max workspaces (default: MAX_RESTORE_SAMPLES or 10)
 #   BACKUP_SCHEDULE           - Cron override; unset = auto-scale by --max-devworkspaces (10/15/25 min)
 #   TEST_TIMEOUT              - Max time per test in seconds (default: 18000 = 5h)
@@ -198,6 +198,7 @@ Each run is stored in a `backup_run_YYYYMMDD_HHMMSS/` directory containing:
 - **FAILED**: Test failed with errors
 - **TIMEOUT**: Test exceeded maximum time limit
 - **CLEANUP_FAILED**: Pre-test cleanup failed
+- **PV_PROVISION_FAILED**: Per-test PV provisioning failed
 EOREADME
 
 echo "Output directory: $RUN_DIR"
@@ -289,34 +290,31 @@ provision_pvs_for_test() {
     bash "$pv_script" "$max_workspaces"
 }
 
+provision_pvs_for_workspace_count() {
+    local max_workspaces="$1"
+
+    if [ "$PROVISION_PVS" != "true" ]; then
+        return 0
+    fi
+
+    echo ""
+    delete_old_pvs
+
+    local pv_count
+    pv_count=$(calculate_pv_provision_count "$max_workspaces")
+    echo ""
+    echo -e "${BLUE}Provisioning PVs for test:${NC}"
+    echo "  Max workspaces: ${max_workspaces}"
+    echo "  Restore headroom (PROVISION_PV_EXTRA): ${PROVISION_PV_EXTRA}"
+    echo "  Argument to provision-pvs.sh: ${pv_count} (includes 10% headroom; script adds another 10%)"
+    provision_pvs_for_test "$pv_count"
+}
+
 calculate_pv_provision_count() {
     local max_workspaces="$1"
     local pv_base=$(( max_workspaces + PROVISION_PV_EXTRA ))
     # 10% headroom before provision-pvs.sh (which applies another 10%)
     echo $(( pv_base + (pv_base / 10) ))
-}
-
-get_max_workspaces_from_plan() {
-    # Find the highest max-devworkspaces value in the test plan
-    local max_workspaces=0
-    local custom_count=$(jq '.custom_tests | length' "$TEST_PLAN_FILE" 2>/dev/null || echo "0")
-
-    for ((i=0; i<custom_count; i++)); do
-        local enabled=$(jq -r ".custom_tests[$i].enabled" "$TEST_PLAN_FILE")
-
-        if [ "$enabled" != "true" ]; then
-            continue
-        fi
-
-        local args=$(jq -r ".custom_tests[$i].args" "$TEST_PLAN_FILE")
-        local workspaces=$(echo "$args" | grep -oP '(?<=--max-devworkspaces )\S+' || echo "0")
-
-        if [ "$workspaces" -gt "$max_workspaces" ]; then
-            max_workspaces=$workspaces
-        fi
-    done
-
-    echo "$max_workspaces"
 }
 
 
@@ -632,6 +630,14 @@ run_backup_test() {
         return 0
     fi
 
+    # Fresh PVs per test so sequential runs (e.g. 1500 then 2500) do not reuse Released volumes
+    if ! provision_pvs_for_workspace_count "$MAX_DEVWORKSPACES"; then
+        echo -e "${RED}FAILED: PV provisioning failed for $TEST_NAME${NC}"
+        TEST_RESULTS+=("$TEST_NAME|PV_PROVISION_FAILED|N/A")
+        FAILED_COUNT=$((FAILED_COUNT + 1))
+        return 0
+    fi
+
     # Run test with timeout
     local test_start=$(date +%s)
     local test_status="RUNNING"
@@ -838,23 +844,11 @@ echo "$(date)" > "$RUN_DIR/test_suite.log"
 load_test_plan_from_json
 show_test_plan
 
-# Provision PVs if enabled (count derived from enabled tests in the plan)
+# PVs are provisioned per test (after pre-test cleanup) when PROVISION_PVS=true
 if [ "$PROVISION_PVS" == "true" ]; then
     echo ""
-    delete_old_pvs
-
-    echo ""
-    max_workspaces=$(get_max_workspaces_from_plan)
-    if [ "$max_workspaces" -eq 0 ]; then
-        echo -e "${YELLOW}No enabled tests with --max-devworkspaces in plan; skipping PV provisioning${NC}"
-    else
-        PV_COUNT=$(calculate_pv_provision_count "$max_workspaces")
-        echo -e "${BLUE}Pre-allocating PVs from test plan:${NC}"
-        echo "  Max workspaces: ${max_workspaces}"
-        echo "  Restore headroom (PROVISION_PV_EXTRA): ${PROVISION_PV_EXTRA}"
-        echo "  Argument to provision-pvs.sh: ${PV_COUNT} (includes 10% headroom; script adds another 10%)"
-        provision_pvs_for_test "$PV_COUNT"
-    fi
+    echo -e "${BLUE}PV provisioning: per-test after pre-test cleanup${NC}"
+    echo "  PROVISION_PV_EXTRA: ${PROVISION_PV_EXTRA}"
 else
     echo ""
     echo -e "${YELLOW}PV provisioning is disabled (PROVISION_PVS=$PROVISION_PVS)${NC}"
