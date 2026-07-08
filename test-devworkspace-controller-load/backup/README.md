@@ -179,8 +179,7 @@ When `BACKUP_SCHEDULE` is unset or `auto`, the cron interval scales with workspa
 | 1000–2000 | `*/15 * * * *` | 15 minutes |
 | &gt; 2000 | `*/25 * * * *` | 25 minutes |
 
-Applied automatically by `backup-load-test.sh`, `make test_backup`, and `run_all_backup_loadtests.sh`
-(via `backup-devworkspace-defaults.sh`).
+Applied automatically by `backup-load-test.sh` and `run_all_backup_loadtests.sh`.
 
 ### Custom Backup Schedule
 
@@ -420,25 +419,32 @@ backed up or the configured `--backup-wait-minutes` expires.
 
 ## DevWorkspace template for backup tests
 
-Backup tests require **per-workspace persistent storage** (not ephemeral). All backup entry points
-(`make test_backup`, `run_all_backup_loadtests.sh`) use the default from
-[`backup-devworkspace-defaults.sh`](backup-devworkspace-defaults.sh):
+Backup tests require **per-workspace persistent storage** (not ephemeral). The default template is
+[`dw-minimal-per-workspace-storage-scale.json`](https://gist.githubusercontent.com/rohanKanojia/fb759dca630fe605880847a54d1e141c/raw/da20c8c01e40cb7cb9ecea65dd8ff3758c0b5f7a/dw-minimal-per-workspace-storage-scale.json)
+(copied in-repo at `dw-minimal-per-workspace-storage-scale.json`).
 
-[`dw-minimal-per-workspace-storage-scale-no-git.json`](dw-minimal-per-workspace-storage-scale-no-git.json) — per-workspace PVC, **no git project** (avoids `project-clone` init at 100m CPU for 2500+ scale runs).
-
-| | Backup template (default) | With git (`-scale.json`) | Controller load test |
-|--|---------------------------|--------------------------|----------------------|
+| | Legacy gist template | Scale-optimized (default) | Controller load test (`dw-minimal.json`) |
+|--|---------------------|---------------------------|------------------------------------------|
 | Storage | per-workspace PVC | per-workspace PVC | ephemeral |
-| Pod CPU (scheduling) | **10m** | **100m** (project-clone init) | 10m |
-| Memory request | 64Mi | 64Mi | 16Mi |
-| Git project | none | hello-world | none |
+| CPU request | 100m | **10m** | 10m |
+| Memory request | 256Mi | **64Mi** | 16Mi |
+| Git project | hello-world | hello-world | none |
+| CPU @ 2500 ws | ~250 cores requested | **~25 cores requested** | ~25 cores requested |
 
-Override only when needed:
+At 2500 workspaces on a 4-node perflab cluster, the legacy **100m CPU** template leaves ~4 pods
+unschedulable (`Insufficient cpu`). The scale template matches controller-test CPU requests while
+keeping PVC + git content for backup/restore sampling.
+
+Override the template:
 
 ```bash
-# Git-backed template (more realistic content, higher CPU at scale)
-BACKUP_DEVWORKSPACE_TEMPLATE=test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale.json make test_backup ARGS="..."
+BACKUP_DEVWORKSPACE_TEMPLATE=/path/to/custom.json make test_backup ARGS="..."
 ```
+
+Or pass `--devworkspace-link` through `runk6.sh` (supports `https://` URLs or a repo-relative file path).
+
+**Smoke-test** after changing the template: run 250 → 500 → 2500 and confirm restore samples (10
+workspaces) still reach Running with project files present.
 
 ## Notes
 
