@@ -15,6 +15,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/configure-dwoc-backup.sh"
+source "${SCRIPT_DIR}/backup-devworkspace-defaults.sh"
 
 # Configuration from arguments
 MAX_DEVWORKSPACES=${1:-15}
@@ -79,10 +80,7 @@ MAX_VUS=$(( MAX_DEVWORKSPACES < 10 ? MAX_DEVWORKSPACES : MAX_DEVWORKSPACES / 4 )
 [[ $MAX_VUS -gt 100 ]] && MAX_VUS=100
 [[ $MAX_VUS -lt 1 ]] && MAX_VUS=1
 
-# Scale-optimized per-workspace template (10m CPU / 64Mi RAM vs 100m / 256Mi in legacy gist).
-# Default: published gist; override with BACKUP_DEVWORKSPACE_TEMPLATE (URL or repo-relative path).
-BACKUP_DEVWORKSPACE_TEMPLATE="${BACKUP_DEVWORKSPACE_TEMPLATE:-https://gist.githubusercontent.com/rohanKanojia/fb759dca630fe605880847a54d1e141c/raw/da20c8c01e40cb7cb9ecea65dd8ff3758c0b5f7a/dw-minimal-per-workspace-storage-scale.json}"
-
+# DevWorkspace template: backup-devworkspace-defaults.sh
 SKIP_CLEANUP=true bash "${SCRIPT_DIR}/../runk6.sh" \
   --dwo-namespace "${LOAD_TEST_NAMESPACE}" \
   --max-devworkspaces "${MAX_DEVWORKSPACES}" \
