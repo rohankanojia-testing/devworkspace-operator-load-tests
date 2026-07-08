@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Only enable errexit when run directly; sourcing this file must not abort callers
+# (e.g. run_all_backup_loadtests.sh records per-test failures and continues).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  set -euo pipefail
+fi
 
 log_info()    { echo -e "ℹ️  $*" >&2; }
 log_success() { echo -e "✅ $*" >&2; }
