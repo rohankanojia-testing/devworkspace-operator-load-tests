@@ -79,13 +79,17 @@ MAX_VUS=$(( MAX_DEVWORKSPACES < 10 ? MAX_DEVWORKSPACES : MAX_DEVWORKSPACES / 4 )
 [[ $MAX_VUS -gt 100 ]] && MAX_VUS=100
 [[ $MAX_VUS -lt 1 ]] && MAX_VUS=1
 
+# Scale-optimized per-workspace template (10m CPU / 64Mi RAM vs 100m / 256Mi in legacy gist).
+# Default: published gist; override with BACKUP_DEVWORKSPACE_TEMPLATE (URL or repo-relative path).
+BACKUP_DEVWORKSPACE_TEMPLATE="${BACKUP_DEVWORKSPACE_TEMPLATE:-https://gist.githubusercontent.com/rohanKanojia/fb759dca630fe605880847a54d1e141c/raw/da20c8c01e40cb7cb9ecea65dd8ff3758c0b5f7a/dw-minimal-per-workspace-storage-scale.json}"
+
 SKIP_CLEANUP=true bash "${SCRIPT_DIR}/../runk6.sh" \
   --dwo-namespace "${LOAD_TEST_NAMESPACE}" \
   --max-devworkspaces "${MAX_DEVWORKSPACES}" \
   --max-vus "${MAX_VUS}" \
   --separate-namespaces "${SEPARATE_NAMESPACE}" \
   --delete-devworkspace-after-ready false \
-  --devworkspace-link "https://gist.githubusercontent.com/rohanKanojia/fa3c9a5524d47e5ec2e064a41b93592c/raw/e8896fe05f7b25ac91221adbcd5986857ac2f861/dw-minimal-custom-dwoc.json" || true
+  --devworkspace-link "${BACKUP_DEVWORKSPACE_TEMPLATE}" || true
 
 # Verify DevWorkspaces created
 if [[ "$SEPARATE_NAMESPACE" == "true" ]]; then

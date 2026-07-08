@@ -141,15 +141,31 @@ export function generateDevWorkspaceToCreate(vuId, iteration, namespace) {
     return devWorkspace;
 }
 
+function loadDevWorkspaceManifestFromFile(filePath) {
+    const body = open(filePath);
+    try {
+        return JSON.parse(body);
+    } catch (e) {
+        throw new Error(`[DW CREATE] Failed to parse DevWorkspace JSON from ${filePath}: ${e.message}`);
+    }
+}
+
 export function downloadAndParseExternalWorkspace(externalDevWorkspaceLink) {
     let manifest;
     if (externalDevWorkspaceLink) {
-        const res = http.get(externalDevWorkspaceLink);
+        if (externalDevWorkspaceLink.startsWith('http://') || externalDevWorkspaceLink.startsWith('https://')) {
+            const res = http.get(externalDevWorkspaceLink);
 
-        if (res.status !== 200) {
-            throw new Error(`[DW CREATE] Failed to fetch JSON content from ${externalDevWorkspaceLink}, got ${res.status}`);
+            if (res.status !== 200) {
+                throw new Error(`[DW CREATE] Failed to fetch JSON content from ${externalDevWorkspaceLink}, got ${res.status}`);
+            }
+            manifest = parseJSONResponseToDevWorkspace(res);
+        } else {
+            const filePath = externalDevWorkspaceLink.startsWith('file://')
+                ? externalDevWorkspaceLink.slice('file://'.length)
+                : externalDevWorkspaceLink;
+            manifest = loadDevWorkspaceManifestFromFile(filePath);
         }
-        manifest = parseJSONResponseToDevWorkspace(res);
     }
 
     return manifest;

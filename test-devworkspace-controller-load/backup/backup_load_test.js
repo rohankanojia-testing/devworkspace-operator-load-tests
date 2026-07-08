@@ -57,9 +57,14 @@ const headers = createAuthHeaders(token);
 // Track backup status with a simple map
 const backupStatusMap = new Map();  // devworkspace_name -> {backed_up: boolean, namespace: string, workspaceId: string}
 const workspaceIdToNameMap = new Map();  // devworkspace_id -> devworkspace_name for quick lookup
-const seenJobUids = new Set();  // Track which jobs we've already processed
+// Cumulative Job UIDs seen while polling. backup_jobs_total uses this count, so it can exceed
+// workspace count when DWOC backup cron fires again before monitoring ends (one Job per cycle
+// per stopped workspace). Use jobsPerWorkspaceId / backup_jobs_per_workspace for per-workspace coverage.
+const seenJobUids = new Set();
 const totalPodsCreated = new Map();  // Track cumulative pod count per job UID
 const jobsPerWorkspaceId = new Map();  // workspace_id -> count of jobs created for that workspace
+// Workspaces whose backup Job finished (Failed after backOffLimit or Succeeded) — not merely created
+const workspaceIdsWithTerminalBackupJob = new Set();
 const permanentlyFailedJobUids = new Set();  // Track jobs that hit Failed=True condition
 const completedJobUidsForDuration = new Set();  // Track jobs already recorded in backup_job_duration
 
@@ -314,14 +319,32 @@ function waitForAllBackupJobsCreation(expectedCount, maxWaitMinutes, pollInterva
 
   while (attempts < maxAttempts) {
     const jobs = getBackupJobs();
+    updateBackupJobMetrics(jobs, 0, { quietLogging: true });
     const currentCount = jobs.length;
+    const workspacesWithTerminalJob = workspaceIdsWithTerminalBackupJob.size;
 
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     const progress = ((currentCount / expectedCount) * 100).toFixed(1);
 
     // Log progress every 10 attempts or when count changes
     if (attempts % 10 === 0 || (attempts > 0 && currentCount !== jobs.length)) {
-      console.log(`  [${elapsed}s] Backup jobs: ${currentCount}/${expectedCount} (${progress}%)`);
+      if (dwocConfigType === 'incorrect') {
+        console.log(
+          `  [${elapsed}s] Backup jobs: ${currentCount}/${expectedCount} live (${progress}%), ` +
+          `${workspacesWithTerminalJob}/${expectedCount} workspaces with terminal jobs`,
+        );
+      } else {
+        console.log(`  [${elapsed}s] Backup jobs: ${currentCount}/${expectedCount} (${progress}%)`);
+      }
+    }
+
+    // Incorrect: each Job retries pods up to backOffLimit, then reaches Failed — done before next cron
+    if (dwocConfigType === 'incorrect' && allWorkspacesHaveTerminalBackupJob()) {
+      console.log(
+        `  ✅ All ${expectedCount} workspaces have terminal backup jobs after ${elapsed}s ` +
+        `(Job pod retries finished; before next cron cycle)`,
+      );
+      return true;
     }
 
     // Success: all jobs created
@@ -627,6 +650,12 @@ function updateBackupJobMetrics(jobs, backedUpCount, options = {}) {
     } else if (status.succeeded !== 1 && (status.active || 0) > 0) {
       currentRunning++;
     }
+
+    const isTerminalJob = status.succeeded === 1
+      || (conditions.some && conditions.some(c => c.type === 'Failed' && c.status === 'True'));
+    if (workspaceId && isTerminalJob) {
+      workspaceIdsWithTerminalBackupJob.add(workspaceId);
+    }
   }
 
   const totalJobsSeen = seenJobUids.size;
@@ -692,6 +721,27 @@ function countJobSucceededBackups(jobs) {
   return succeeded;
 }
 
+function countWorkspacesWithBackupJobs() {
+  return jobsPerWorkspaceId.size;
+}
+
+function allWorkspacesReceivedBackupJob() {
+  return countWorkspacesWithBackupJobs() >= backupStatusMap.size;
+}
+
+function allWorkspacesHaveTerminalBackupJob() {
+  return workspaceIdsWithTerminalBackupJob.size >= backupStatusMap.size;
+}
+
+function countCurrentlyRunningBackupJobs(jobs) {
+  return jobs.filter(job => {
+    const status = job.status || {};
+    return status.succeeded !== 1
+      && !(status.conditions || []).some(c => c.type === 'Failed' && c.status === 'True')
+      && (status.active || 0) > 0;
+  }).length;
+}
+
 function markWorkspacesBackedUpFromJobs(jobs) {
   for (const job of jobs) {
     if (job.status?.succeeded !== 1) {
@@ -733,14 +783,25 @@ function monitorBackupJobsAndMetrics(durationMinutes) {
       break;
     }
 
-    const currentRunning = jobs.filter(job => {
-      const status = job.status || {};
-      return status.succeeded !== 1
-        && !(status.conditions || []).some(c => c.type === 'Failed' && c.status === 'True')
-        && (status.active || 0) > 0;
-    }).length;
+    const currentRunning = countCurrentlyRunningBackupJobs(jobs);
 
-    if (currentRunning === 0 && seenJobUids.size === backupStatusMap.size) {
+    // Incorrect: stop once every workspace's first Job is terminal (Failed after backOffLimit or
+    // Succeeded). Pod retries run inside the Job; this should finish well before the next cron tick.
+    if (dwocConfigType === 'incorrect'
+      && currentRunning === 0
+      && allWorkspacesHaveTerminalBackupJob()) {
+      console.log(
+        `\n✅ All ${backupStatusMap.size} workspaces have terminal backup jobs (incorrect mode). ` +
+        `Stopping before the next cron cycle would create duplicate Jobs.`,
+      );
+      break;
+    }
+
+    // Correct/external: exit after a single job wave completes (one Job per workspace).
+    // If cron has already created a second wave, seenJobUids exceeds workspace count — keep monitoring.
+    if (currentRunning === 0
+      && allWorkspacesReceivedBackupJob()
+      && seenJobUids.size <= backupStatusMap.size) {
       if (backedUpCount < backupStatusMap.size) {
         console.warn(`\n⚠️ All jobs completed but only ${backedUpCount}/${backupStatusMap.size} workspaces backed up`);
       }
@@ -925,6 +986,12 @@ function collectFinalMetrics() {
   console.log(`Workspaces Backed Up: ${backedUpCount}/${backupStatusMap.size}`);
   console.log(`Average Jobs per Workspace: ${avgJobsPerWorkspace.toFixed(2)}`);
   console.log(`Max Jobs for Any Workspace: ${maxJobsForAnyWorkspace}`);
+  if (avgJobsPerWorkspace > 1.05) {
+    console.log(
+      'Note: backup_jobs_total can exceed workspace count when monitoring spans multiple DWOC ' +
+      'backup cron cycles (each stopped workspace may get one Job per cycle).',
+    );
+  }
 
   if (backupStatusMap.size > 0) {
     const successRate = ((backedUpCount / backupStatusMap.size) * 100).toFixed(2);
