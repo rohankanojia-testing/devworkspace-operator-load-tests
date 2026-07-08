@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Only enable errexit when run directly; sourcing must not abort suite callers.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  set -euo pipefail
+fi
 
 log_info()    { echo -e "ℹ️  $*" >&2; }
 log_success() { echo -e "✅ $*" >&2; }
