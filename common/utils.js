@@ -5,31 +5,6 @@ const labelType = "test-type";
 const labelKey = "load-test";
 const externalDevWorkspaceLink = __ENV.DEVWORKSPACE_LINK || '';
 
-function resolveDevWorkspaceFilePath(link) {
-    if (!link || link.startsWith('http://') || link.startsWith('https://')) {
-        return '';
-    }
-    return link.startsWith('file://') ? link.slice('file://'.length) : link;
-}
-
-function loadDevWorkspaceManifestFromFile(filePath) {
-    const body = open(filePath);
-    try {
-        return JSON.parse(body);
-    } catch (e) {
-        throw new Error(`[DW CREATE] Failed to parse DevWorkspace JSON from ${filePath}: ${e.message}`);
-    }
-}
-
-// k6 only allows open() in init stage — load file-backed templates at module init.
-const fileBackedDevWorkspaceTemplate = (() => {
-    const filePath = resolveDevWorkspaceFilePath(externalDevWorkspaceLink);
-    if (!filePath) {
-        return null;
-    }
-    return loadDevWorkspaceManifestFromFile(filePath);
-})();
-
 export function createAuthHeaders(token, contentType = 'application/json') {
     return {
         Authorization: `Bearer ${token}`,
@@ -166,25 +141,34 @@ export function generateDevWorkspaceToCreate(vuId, iteration, namespace) {
     return devWorkspace;
 }
 
-function cloneDevWorkspaceTemplate(manifest) {
-    return JSON.parse(JSON.stringify(manifest));
+function loadDevWorkspaceManifestFromFile(filePath) {
+    const body = open(filePath);
+    try {
+        return JSON.parse(body);
+    } catch (e) {
+        throw new Error(`[DW CREATE] Failed to parse DevWorkspace JSON from ${filePath}: ${e.message}`);
+    }
 }
 
-export function downloadAndParseExternalWorkspace(link) {
-    if (fileBackedDevWorkspaceTemplate) {
-        return cloneDevWorkspaceTemplate(fileBackedDevWorkspaceTemplate);
-    }
+export function downloadAndParseExternalWorkspace(externalDevWorkspaceLink) {
+    let manifest;
+    if (externalDevWorkspaceLink) {
+        if (externalDevWorkspaceLink.startsWith('http://') || externalDevWorkspaceLink.startsWith('https://')) {
+            const res = http.get(externalDevWorkspaceLink);
 
-    if (link.startsWith('http://') || link.startsWith('https://')) {
-        const res = http.get(link);
-
-        if (res.status !== 200) {
-            throw new Error(`[DW CREATE] Failed to fetch JSON content from ${link}, got ${res.status}`);
+            if (res.status !== 200) {
+                throw new Error(`[DW CREATE] Failed to fetch JSON content from ${externalDevWorkspaceLink}, got ${res.status}`);
+            }
+            manifest = parseJSONResponseToDevWorkspace(res);
+        } else {
+            const filePath = externalDevWorkspaceLink.startsWith('file://')
+                ? externalDevWorkspaceLink.slice('file://'.length)
+                : externalDevWorkspaceLink;
+            manifest = loadDevWorkspaceManifestFromFile(filePath);
         }
-        return parseJSONResponseToDevWorkspace(res);
     }
 
-    throw new Error(`[DW CREATE] Unsupported DevWorkspace link: ${link}`);
+    return manifest;
 }
 
 export function getDevWorkspacesFromApiServer(apiServer, loadTestNamespace, headers, useSeparateNamespaces) {
