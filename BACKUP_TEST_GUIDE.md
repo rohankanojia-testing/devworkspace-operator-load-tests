@@ -119,7 +119,7 @@ For advanced options like separate namespaces mode:
 | `--namespace <name>` | `loadtest-devworkspaces` | Namespace for workspaces |
 | `--dwo-namespace <name>` | `openshift-operators` | Operator namespace |
 | `--separate-namespaces <bool>` | `false` | Use separate namespace per workspace |
-| `--devworkspace-link <url>` | (per-workspace-storage gist) | DevWorkspace template URL |
+| `--devworkspace-link <url>` | (postStart scale template) | DevWorkspace template path or URL |
 | `--devworkspace-ready-timeout <S>` | `600` | Seconds to wait for ready state |
 
 #### Advanced Examples

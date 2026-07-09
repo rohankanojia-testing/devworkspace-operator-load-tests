@@ -1,0 +1,54 @@
+{
+  "apiVersion": "workspace.devfile.io/v1alpha2",
+  "kind": "DevWorkspace",
+  "metadata": {
+    "name": "dw-minimal-per-workspace-storage-scale-poststart"
+  },
+  "spec": {
+    "started": true,
+    "template": {
+      "attributes": {
+        "controller.devfile.io/storage-type": "per-workspace",
+        "controller.devfile.io/project-clone": "disable"
+      },
+      "components": [
+        {
+          "name": "workspace-storage",
+          "volume": {
+            "size": "8Mi"
+          }
+        },
+        {
+          "name": "universal-developer-image",
+          "container": {
+            "image": "registry.access.redhat.com/ubi9/ubi-micro:9.6-1752751762",
+            "command": ["sleep", "infinity"],
+            "imagePullPolicy": "IfNotPresent",
+            "mountSources": false,
+            "cpuRequest": "10m",
+            "cpuLimit": "50m",
+            "memoryRequest": "32Mi",
+            "memoryLimit": "64Mi",
+            "volumeMounts": [
+              {
+                "name": "workspace-storage",
+                "path": "/projects"
+              }
+            ],
+            "lifecycle": {
+              "postStart": {
+                "exec": {
+                  "command": [
+                    "/bin/sh",
+                    "-c",
+                    "mkdir -p /projects/loadtest && echo backup-marker > /projects/loadtest/marker.txt"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

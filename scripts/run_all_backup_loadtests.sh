@@ -20,6 +20,7 @@
 #   PROVISION_PVS             - Re-provision PVs before each test (default: true; auto false on CRC)
 #   PROVISION_PV_EXTRA        - Extra PV headroom beyond max workspaces (default: MAX_RESTORE_SAMPLES or 10)
 #   BACKUP_SCHEDULE           - Cron override; unset = auto-scale by --max-devworkspaces (10/15/25 min)
+#   BACKUP_DEVWORKSPACE_TEMPLATE - DevWorkspace JSON path/URL (default: postStart scale template)
 #   TEST_TIMEOUT              - Max time per test in seconds (default: 18000 = 5h)
 #   CLEANUP_MAX_WAIT          - Max time for cleanup in seconds (default: 7200 = 2h)
 #

@@ -79,6 +79,8 @@ jobs:
           # Use ttl.sh ephemeral registry (no authentication required)
           kubectl create namespace $LOAD_TEST_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           RANDOM_ID="backup-test-${{ github.run_id }}-$(date +%s)"
+          # PostStart template: no project-clone, seeds /projects for DWO backup/restore (ttl.sh correct mode).
+          export BACKUP_DEVWORKSPACE_TEMPLATE="${GITHUB_WORKSPACE}/test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale-poststart.json"
           make test_backup \
             MAX_DEVWORKSPACES=1 \
             BACKUP_MONITOR_DURATION=5 \

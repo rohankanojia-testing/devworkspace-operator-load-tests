@@ -420,31 +420,43 @@ backed up or the configured `--backup-wait-minutes` expires.
 ## DevWorkspace template for backup tests
 
 Backup tests require **per-workspace persistent storage** (not ephemeral). The default template is
-[`dw-minimal-per-workspace-storage-scale.json`](https://gist.githubusercontent.com/rohanKanojia/fb759dca630fe605880847a54d1e141c/raw/da20c8c01e40cb7cb9ecea65dd8ff3758c0b5f7a/dw-minimal-per-workspace-storage-scale.json)
-(copied in-repo at `dw-minimal-per-workspace-storage-scale.json`).
+[`dw-minimal-per-workspace-storage-scale-poststart.json`](dw-minimal-per-workspace-storage-scale-poststart.json)
+(no git / no `project-clone` init, PVC mounted at `/projects`, `postStart` seeds `loadtest/marker.txt`).
 
-| | Legacy gist template | Scale-optimized (default) | Controller load test (`dw-minimal.json`) |
-|--|---------------------|---------------------------|------------------------------------------|
-| Storage | per-workspace PVC | per-workspace PVC | ephemeral |
-| CPU request | 100m | **10m** | 10m |
-| Memory request | 256Mi | **64Mi** | 16Mi |
-| Git project | hello-world | hello-world | none |
-| CPU @ 2500 ws | ~250 cores requested | **~25 cores requested** | ~25 cores requested |
+| | Legacy gist | Git scale | **PostStart (default)** | Controller load test |
+|--|-------------|-----------|-------------------------|----------------------|
+| Storage | per-workspace PVC | per-workspace PVC | per-workspace PVC @ `/projects` | ephemeral |
+| Main CPU request | 100m | 10m | **10m** | 10m |
+| Scheduling CPU | ~100m | **~100m** (project-clone) | **~10m** | ~10m |
+| Memory request | 256Mi | 64Mi | **32Mi** | 16Mi |
+| Git project | hello-world | hello-world | **none** | none |
+| Backup content | git clone | git clone | **postStart marker** | n/a |
 
-At 2500 workspaces on a 4-node perflab cluster, the legacy **100m CPU** template leaves ~4 pods
-unschedulable (`Insufficient cpu`). The scale template matches controller-test CPU requests while
-keeping PVC + git content for backup/restore sampling.
+At 2500 workspaces on a 4-node perflab cluster, the git scale template leaves pods unschedulable
+(`Insufficient cpu`) because `project-clone` requests 100m. The postStart template avoids that init
+container while still providing archivable `/projects` content for backup and restore.
 
 Override the template:
 
 ```bash
+# Git-backed scale template (legacy behavior)
+BACKUP_DEVWORKSPACE_TEMPLATE=test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale.json \
+  make test_backup ARGS="..."
+
+# Custom template
 BACKUP_DEVWORKSPACE_TEMPLATE=/path/to/custom.json make test_backup ARGS="..."
 ```
 
 Or pass `--devworkspace-link` through `runk6.sh` (supports `https://` URLs or a repo-relative file path).
 
-**Smoke-test** after changing the template: run 250 → 500 → 2500 and confirm restore samples (10
-workspaces) still reach Running with project files present.
+**Smoke-test** after changing the template:
+
+```bash
+./scripts/run_all_backup_loadtests.sh test-plans/backup-restore-poststart-smoke-test-plan.json
+```
+
+Then scale 250 → 500 → 2500 and confirm restore samples reach Running. Optionally verify restored
+content: `kubectl exec -n <ns> <pod> -- cat /projects/loadtest/marker.txt`.
 
 ## Notes
 

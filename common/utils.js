@@ -5,6 +5,19 @@ const labelType = "test-type";
 const labelKey = "load-test";
 const externalDevWorkspaceLink = __ENV.DEVWORKSPACE_LINK || '';
 
+function resolveLocalDevWorkspacePath(link) {
+    if (!link || link.startsWith('http://') || link.startsWith('https://')) {
+        return null;
+    }
+    return link.startsWith('file://') ? link.slice('file://'.length) : link;
+}
+
+// k6 allows open() only in the init stage; preload file-backed templates at module load.
+const localDevWorkspacePath = resolveLocalDevWorkspacePath(externalDevWorkspaceLink);
+const preloadedDevWorkspaceManifest = localDevWorkspacePath
+    ? JSON.parse(open(localDevWorkspacePath))
+    : null;
+
 export function createAuthHeaders(token, contentType = 'application/json') {
     return {
         Authorization: `Bearer ${token}`,
@@ -160,10 +173,10 @@ export function downloadAndParseExternalWorkspace(externalDevWorkspaceLink) {
                 throw new Error(`[DW CREATE] Failed to fetch JSON content from ${externalDevWorkspaceLink}, got ${res.status}`);
             }
             manifest = parseJSONResponseToDevWorkspace(res);
+        } else if (preloadedDevWorkspaceManifest) {
+            manifest = JSON.parse(JSON.stringify(preloadedDevWorkspaceManifest));
         } else {
-            const filePath = externalDevWorkspaceLink.startsWith('file://')
-                ? externalDevWorkspaceLink.slice('file://'.length)
-                : externalDevWorkspaceLink;
+            const filePath = resolveLocalDevWorkspacePath(externalDevWorkspaceLink);
             manifest = loadDevWorkspaceManifestFromFile(filePath);
         }
     }

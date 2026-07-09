@@ -1,0 +1,12 @@
+{
+  "description": "PostStart backup template smoke test — 30 workspaces, openshift-internal, no project-clone (10m CPU). Validates backup ImageStreamTags and restore sampling with /projects/marker.txt seeding.",
+  "tests": [],
+  "custom_tests": [
+    {
+      "name": "backup_30_poststart_smoke_internal",
+      "enabled": true,
+      "description": "Smoke: 30 workspaces, postStart template, openshift-internal registry",
+      "args": "--mode binary --max-vus 30 --max-devworkspaces 30 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 900 --test-duration-minutes 15 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"\" --registry-secret \"\" --backup-wait-minutes 20"
+    }
+  ]
+}

@@ -362,6 +362,18 @@ make test_backup \
 tight on memory, set `backup_30_single_ns_internal_crc` to `enabled: true` and disable the
 separate-namespaces test.
 
+### 9b. `backup-restore-poststart-smoke-test-plan.json` - PostStart Template Smoke (30 workspaces)
+
+Validates the default **postStart** backup template (no `project-clone`, 10m CPU, marker file on
+`/projects`). Same pass criteria as the CRC internal plan.
+
+```bash
+./scripts/run_all_backup_loadtests.sh \
+  test-plans/backup-restore-poststart-smoke-test-plan.json
+```
+
+On perflab with static PVs: `PROVISION_PV_EXTRA=10 ./scripts/run_all_backup_loadtests.sh ...`
+
 ### 10. `webhook-crc-test-plan.json` - Webhook Server CRC/Local Testing
 Quick webhook server load tests for local development clusters (CRC, Minikube, etc.):
 - 50 users - smoke test - enabled
