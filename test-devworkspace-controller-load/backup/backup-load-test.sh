@@ -80,10 +80,10 @@ MAX_VUS=$(( MAX_DEVWORKSPACES < 10 ? MAX_DEVWORKSPACES : MAX_DEVWORKSPACES / 4 )
 [[ $MAX_VUS -gt 100 ]] && MAX_VUS=100
 [[ $MAX_VUS -lt 1 ]] && MAX_VUS=1
 
-# PostStart scale template: 10m CPU, no project-clone, mountSources + postStart seeds /projects.
-# Override with BACKUP_DEVWORKSPACE_TEMPLATE (absolute path, repo-relative path, or https URL).
+# Git scale template + DWOC projectClone tuning (10m init CPU). Override via BACKUP_DEVWORKSPACE_TEMPLATE.
 BACKUP_DEVWORKSPACE_TEMPLATE="$(resolve_backup_devworkspace_template "${BACKUP_DEVWORKSPACE_TEMPLATE:-}")"
 echo "DevWorkspace template: ${BACKUP_DEVWORKSPACE_TEMPLATE}"
+echo "DWOC projectClone tuning: ${DWOC_PROJECT_CLONE_TUNING:-true} (cpu=${DWOC_PROJECT_CLONE_CPU_REQUEST:-10m}, mem=${DWOC_PROJECT_CLONE_MEMORY_REQUEST:-32Mi})"
 
 SKIP_CLEANUP=true bash "${SCRIPT_DIR}/../runk6.sh" \
   --dwo-namespace "${LOAD_TEST_NAMESPACE}" \
@@ -135,12 +135,9 @@ echo ""
 echo "Phase 4: Cleanup"
 echo "========================================"
 
-# Reset DWOC configuration
+# Reset DWOC configuration (backup + projectClone tuning)
 echo "ℹ️  Resetting DWOC backup configuration..."
-kubectl patch devworkspaceoperatorconfig devworkspace-operator-config -n "${DWO_NAMESPACE}" \
-  --type=merge \
-  --patch='{"config":{"workspace":{"backupCronJob":{"enable":false}}}}' 2>/dev/null || true
-echo "✅ DWOC backup disabled"
+reset_dwoc_config
 echo ""
 
 # Note: DevWorkspaces, backup jobs, and namespace are cleaned up by run-backup-load-test.sh

@@ -14,6 +14,68 @@ log_warning() { echo -e "⚠️  $*" >&2; }
 DWO_CONFIG_NAME="${DWO_CONFIG_NAME:-devworkspace-operator-config}"
 DWO_NAMESPACE="${DWO_NAMESPACE:-openshift-operators}"
 
+# project-clone init container defaults (DWO default is 100m CPU / 128Mi — scheduling bottleneck at scale).
+DWOC_PROJECT_CLONE_TUNING="${DWOC_PROJECT_CLONE_TUNING:-true}"
+DWOC_PROJECT_CLONE_CPU_REQUEST="${DWOC_PROJECT_CLONE_CPU_REQUEST:-10m}"
+DWOC_PROJECT_CLONE_MEMORY_REQUEST="${DWOC_PROJECT_CLONE_MEMORY_REQUEST:-32Mi}"
+DWOC_PROJECT_CLONE_CPU_LIMIT="${DWOC_PROJECT_CLONE_CPU_LIMIT:-50m}"
+DWOC_PROJECT_CLONE_MEMORY_LIMIT="${DWOC_PROJECT_CLONE_MEMORY_LIMIT:-64Mi}"
+
+apply_project_clone_tuning() {
+  if [[ "${DWOC_PROJECT_CLONE_TUNING}" != "true" ]]; then
+    log_info "DWOC projectClone tuning skipped (DWOC_PROJECT_CLONE_TUNING=false)"
+    return 0
+  fi
+
+  if ! kubectl get devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" >/dev/null 2>&1; then
+    log_error "DevWorkspaceOperatorConfig not found; cannot apply projectClone tuning"
+    return 1
+  fi
+
+  log_info "Applying DWOC projectClone resource tuning..."
+  log_info "  requests: cpu=${DWOC_PROJECT_CLONE_CPU_REQUEST}, memory=${DWOC_PROJECT_CLONE_MEMORY_REQUEST}"
+  log_info "  limits:   cpu=${DWOC_PROJECT_CLONE_CPU_LIMIT}, memory=${DWOC_PROJECT_CLONE_MEMORY_LIMIT}"
+
+  kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type merge --patch "$(cat <<EOF
+{
+  "config": {
+    "workspace": {
+      "projectClone": {
+        "resources": {
+          "requests": {
+            "cpu": "${DWOC_PROJECT_CLONE_CPU_REQUEST}",
+            "memory": "${DWOC_PROJECT_CLONE_MEMORY_REQUEST}"
+          },
+          "limits": {
+            "cpu": "${DWOC_PROJECT_CLONE_CPU_LIMIT}",
+            "memory": "${DWOC_PROJECT_CLONE_MEMORY_LIMIT}"
+          }
+        }
+      }
+    }
+  }
+}
+EOF
+)"
+
+  log_success "DWOC projectClone tuning applied"
+}
+
+restore_project_clone_tuning() {
+  if [[ "${DWOC_PROJECT_CLONE_TUNING}" != "true" ]]; then
+    return 0
+  fi
+
+  if ! kubectl get devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log_info "Removing DWOC projectClone tuning..."
+  kubectl patch devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" --type json --patch '[
+    {"op": "remove", "path": "/config/workspace/projectClone"}
+  ]' 2>/dev/null || log_info "No projectClone section to remove"
+}
+
 # Return cron schedule scaled to workspace count.
 # < 1000: every 10m; 1000-2000: every 15m; > 2000: every 25m
 backup_schedule_for_workspaces() {
@@ -333,6 +395,8 @@ config:
   else
     log_info "DevWorkspaceOperatorConfig does not exist, nothing to reset"
   fi
+
+  restore_project_clone_tuning
 }
 
 # Validate DWOC configuration was applied
@@ -361,6 +425,15 @@ validate_dwoc_applied() {
 
     log_info "Registry path: ${registry_path:-<not set>}"
     log_info "Auth secret: ${auth_secret:-<not set>}"
+
+    if [[ "${DWOC_PROJECT_CLONE_TUNING}" == "true" ]]; then
+      local clone_cpu clone_mem
+      clone_cpu=$(kubectl get devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" \
+        -o jsonpath='{.config.workspace.projectClone.resources.requests.cpu}' 2>/dev/null || echo "")
+      clone_mem=$(kubectl get devworkspaceoperatorconfig "$DWO_CONFIG_NAME" -n "$DWO_NAMESPACE" \
+        -o jsonpath='{.config.workspace.projectClone.resources.requests.memory}' 2>/dev/null || echo "")
+      log_info "projectClone requests: cpu=${clone_cpu:-<not set>}, memory=${clone_mem:-<not set>}"
+    fi
 
     return 0
   else
@@ -392,6 +465,7 @@ configure_dwoc_for_backup() {
       ;;
   esac
 
+  apply_project_clone_tuning
   validate_dwoc_applied
 }
 

@@ -420,37 +420,32 @@ backed up or the configured `--backup-wait-minutes` expires.
 ## DevWorkspace template for backup tests
 
 Backup tests require **per-workspace persistent storage** (not ephemeral). The default template is
-[`dw-minimal-per-workspace-storage-scale-poststart.json`](dw-minimal-per-workspace-storage-scale-poststart.json)
-(no git / no `project-clone` init, `mountSources: true` for `/projects` on the persistence PVC,
-`postStart` seeds `loadtest/marker.txt` — same PVC path DWO backup jobs archive).
+[`dw-minimal-per-workspace-storage-scale.json`](dw-minimal-per-workspace-storage-scale.json)
+(git hello-world). Backup setup also patches **DWOC `projectClone` resources** to **10m CPU / 32Mi**
+(init default is 100m / 128Mi).
 
-| | Legacy gist | Git scale | **PostStart (default)** | Controller load test |
-|--|-------------|-----------|-------------------------|----------------------|
+| | Legacy gist | **Git scale (default)** | PostStart alt | Controller load test |
+|--|-------------|-------------------------|---------------|----------------------|
 | Storage | per-workspace PVC | per-workspace PVC | persistence `@ /projects` | ephemeral |
-| Main CPU request | 100m | 10m | **10m** | 10m |
-| Scheduling CPU | ~100m | **~100m** (project-clone) | **~10m** | ~10m |
-| Memory request | 256Mi | 64Mi | **32Mi** | 16Mi |
-| Git project | hello-world | hello-world | **none** | none |
-| Backup content | git clone | git clone | **postStart marker** | n/a |
+| Main CPU request | 100m | 10m | 10m | 10m |
+| Scheduling CPU | ~100m | **~10m** (DWOC projectClone) | ~10m | ~10m |
+| Memory request | 256Mi | 64Mi | 32Mi | 16Mi |
+| Git project | hello-world | hello-world | none (postStart) | none |
 
-At 2500 workspaces on a 4-node perflab cluster, the git scale template leaves pods unschedulable
-(`Insufficient cpu`) because `project-clone` requests 100m. The postStart template avoids that init
-container while still providing archivable `/projects` content for backup and restore.
-
-DWO backup jobs mount the **persistence** PVC at `/workspace` and archive `/workspace/projects`.
-Use `mountSources: true` (no git projects) so `/projects` maps to that PVC; seed content via
-`postStart`. Do not mount the named volume component at `/workspace` for backup — that is a
-different mount than the persistence PVC backup reads.
-
-Override the template:
+At 2500 workspaces, DWO's default **100m `project-clone`** init causes `Insufficient cpu`.
+`configure-dwoc-backup.sh` applies `config.workspace.projectClone.resources` before each test and
+removes it on teardown.
 
 ```bash
-# Git-backed scale template (legacy behavior)
-BACKUP_DEVWORKSPACE_TEMPLATE=test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale.json \
-  make test_backup ARGS="..."
+# Default: git template + projectClone 10m/32Mi
+make test_backup ARGS="..."
 
-# Custom template
-BACKUP_DEVWORKSPACE_TEMPLATE=/path/to/custom.json make test_backup ARGS="..."
+# DWO defaults (100m project-clone)
+DWOC_PROJECT_CLONE_TUNING=false make test_backup ARGS="..."
+
+# PostStart template (no project-clone init)
+BACKUP_DEVWORKSPACE_TEMPLATE=test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale-poststart.json \
+  make test_backup ARGS="..."
 ```
 
 Or pass `--devworkspace-link` through `runk6.sh` (supports `https://` URLs or a repo-relative file path).
@@ -458,11 +453,8 @@ Or pass `--devworkspace-link` through `runk6.sh` (supports `https://` URLs or a 
 **Smoke-test** after changing the template:
 
 ```bash
-./scripts/run_all_backup_loadtests.sh test-plans/backup-restore-poststart-smoke-test-plan.json
+./scripts/run_all_backup_loadtests.sh test-plans/backup-restore-crc-openshift-internal-test-plan.json
 ```
-
-Then scale 250 → 500 → 2500 and confirm restore samples reach Running. Optionally verify restored
-content: `kubectl exec -n <ns> <pod> -- cat /projects/loadtest/marker.txt`.
 
 ## Notes
 
