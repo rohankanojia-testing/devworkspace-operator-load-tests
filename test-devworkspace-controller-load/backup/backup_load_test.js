@@ -143,6 +143,7 @@ const maxCpuMillicores = 250;
 const maxMemoryBytes = 200 * 1024 * 1024;
 const registryConfig = {
   registry: __ENV.REGISTRY_URL || 'quay.io',
+  registryPath: __ENV.REGISTRY_PATH || '',
   username: __ENV.REGISTRY_USERNAME,
   password: __ENV.REGISTRY_PASSWORD,
   expectedArtifactType: __ENV.EXPECTED_ARTIFACT_TYPE || 'application/vnd.devworkspace.backup.v1+json'
@@ -1144,11 +1145,17 @@ function captureBackupJobPodLogs(jobNamespace, jobName) {
   }
 }
 
-function prepareRestoreSpec(originalSpec) {
+function prepareRestoreSpec(originalSpec, namespace, workspaceName) {
   const restoreSpec = JSON.parse(JSON.stringify(originalSpec));
   if (!restoreSpec.template) restoreSpec.template = {};
   if (!restoreSpec.template.attributes) restoreSpec.template.attributes = {};
   restoreSpec.template.attributes['controller.devfile.io/restore-workspace'] = 'true';
+
+  const registryPath = (registryConfig.registryPath || '').replace(/\/$/, '');
+  if (registryPath) {
+    restoreSpec.template.attributes['controller.devfile.io/restore-source-image'] =
+      `${registryPath}/${namespace}/${workspaceName}:latest`;
+  }
 
   // Avoid git clone overwriting restored /projects content.
   if (restoreSpec.template.projects) {
@@ -1169,6 +1176,27 @@ function prepareRestoreSpec(originalSpec) {
 
   restoreSpec.started = true;
   return restoreSpec;
+}
+
+function deleteAllPvcsInNamespace(namespace) {
+  const listUrl = `${apiServer}/api/v1/namespaces/${namespace}/persistentvolumeclaims`;
+  const listRes = http.get(listUrl, {headers});
+  if (listRes.status !== 200) {
+    console.warn(`  ⚠️  Failed to list PVCs in ${namespace}: HTTP ${listRes.status}`);
+    return;
+  }
+
+  const pvcs = JSON.parse(listRes.body).items || [];
+  for (const pvc of pvcs) {
+    const pvcName = pvc.metadata.name;
+    const delUrl = `${apiServer}/api/v1/namespaces/${namespace}/persistentvolumeclaims/${pvcName}`;
+    const delRes = http.del(delUrl, null, {headers});
+    if (delRes.status === 200 || delRes.status === 202) {
+      console.log(`  Deleted PVC ${namespace}/${pvcName} before restore`);
+    } else {
+      console.warn(`  ⚠️  Failed to delete PVC ${namespace}/${pvcName}: HTTP ${delRes.status}`);
+    }
+  }
 }
 
 function deleteWorkspacePvcs(namespace, workspaceId) {
@@ -1276,15 +1304,16 @@ function verifyWorkspaceRestore(backedUpWorkspaces) {
   sleep(5);
 
   console.log(`\nDeleting workspace PVCs before restore...`);
-  for (const ws of samplesToRestore) {
-    deleteWorkspacePvcs(ws.namespace, ws.workspaceId);
+  for (const ns of uniqueNamespaces) {
+    deleteAllPvcsInNamespace(ns);
   }
-  sleep(10);
+  console.log('Waiting 30 seconds for ttl.sh image propagation and PVC cleanup...');
+  sleep(30);
 
   // STEP 2: Create all workspaces in parallel
   console.log(`\nStep 2: Creating ${samplesToRestore.length} restored workspaces in parallel...`);
   const createRequests = samplesToRestore.map(workspace => {
-    const restoreSpec = prepareRestoreSpec(workspace.originalSpec);
+    const restoreSpec = prepareRestoreSpec(workspace.originalSpec, workspace.namespace, workspace.name);
 
     // Preserve original labels to ensure cleanup finds these workspaces
     const metadata = {

@@ -619,7 +619,7 @@ run_k6_binary_test() {
   fi
 
   # Derive REGISTRY_URL from DWOC config if not set
-  if [[ -z "${REGISTRY_URL:-}" ]]; then
+  if [[ -z "${REGISTRY_URL:-}" ]] || [[ -z "${REGISTRY_PATH:-}" ]]; then
     REGISTRY_PATH=$(kubectl get devworkspaceoperatorconfig devworkspace-operator-config -n "${DWO_NAMESPACE}" \
       -o jsonpath='{.config.workspace.backupCronJob.registry.path}' 2>/dev/null || echo "")
 
@@ -627,6 +627,7 @@ run_k6_binary_test() {
       # Extract just the registry host (e.g., "quay.io" from "quay.io/username/repo")
       REGISTRY_URL=$(echo "$REGISTRY_PATH" | cut -d'/' -f1)
       log_info "Derived REGISTRY_URL from DWOC config: $REGISTRY_URL"
+      log_info "Registry path from DWOC: $REGISTRY_PATH"
     else
       log_warning "REGISTRY_URL not set and could not derive from DWOC config"
       REGISTRY_URL=""
@@ -651,6 +652,7 @@ run_k6_binary_test() {
     INITIAL_ETCD_RESTARTS="${INITIAL_ETCD_RESTARTS}" \
     INITIAL_OPERATOR_RESTARTS="${INITIAL_OPERATOR_RESTARTS}" \
     REGISTRY_URL="${REGISTRY_URL}" \
+    REGISTRY_PATH="${REGISTRY_PATH:-}" \
     REGISTRY_USERNAME="${REGISTRY_USERNAME}" \
     REGISTRY_PASSWORD="${REGISTRY_PASSWORD}" \
     k6 run "${K6_SCRIPT}"; then
