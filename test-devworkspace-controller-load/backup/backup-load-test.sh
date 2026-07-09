@@ -80,7 +80,7 @@ MAX_VUS=$(( MAX_DEVWORKSPACES < 10 ? MAX_DEVWORKSPACES : MAX_DEVWORKSPACES / 4 )
 [[ $MAX_VUS -gt 100 ]] && MAX_VUS=100
 [[ $MAX_VUS -lt 1 ]] && MAX_VUS=1
 
-# PostStart scale template: 10m CPU, no project-clone, PVC seeds /workspace/projects for DWO backup.
+# PostStart scale template: 10m CPU, no project-clone, mountSources + postStart seeds /projects.
 # Override with BACKUP_DEVWORKSPACE_TEMPLATE (absolute path, repo-relative path, or https URL).
 BACKUP_DEVWORKSPACE_TEMPLATE="$(resolve_backup_devworkspace_template "${BACKUP_DEVWORKSPACE_TEMPLATE:-}")"
 echo "DevWorkspace template: ${BACKUP_DEVWORKSPACE_TEMPLATE}"

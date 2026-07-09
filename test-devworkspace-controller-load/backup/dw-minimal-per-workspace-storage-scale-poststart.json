@@ -24,7 +24,7 @@
             "image": "registry.access.redhat.com/ubi9/ubi-micro:9.6-1752751762",
             "command": ["sleep", "infinity"],
             "imagePullPolicy": "IfNotPresent",
-            "mountSources": false,
+            "mountSources": true,
             "cpuRequest": "10m",
             "cpuLimit": "50m",
             "memoryRequest": "32Mi",
@@ -32,7 +32,7 @@
             "volumeMounts": [
               {
                 "name": "workspace-storage",
-                "path": "/workspace"
+                "path": "/workspace-storage"
               }
             ],
             "lifecycle": {
@@ -41,7 +41,7 @@
                   "command": [
                     "/bin/sh",
                     "-c",
-                    "mkdir -p /workspace/projects/loadtest && echo backup-marker > /workspace/projects/loadtest/marker.txt"
+                    "mkdir -p /projects/loadtest && echo backup-marker > /projects/loadtest/marker.txt"
                   ]
                 }
               }
