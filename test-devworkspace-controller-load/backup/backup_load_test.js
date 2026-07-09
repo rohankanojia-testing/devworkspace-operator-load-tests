@@ -1144,6 +1144,59 @@ function captureBackupJobPodLogs(jobNamespace, jobName) {
   }
 }
 
+function prepareRestoreSpec(originalSpec) {
+  const restoreSpec = JSON.parse(JSON.stringify(originalSpec));
+  if (!restoreSpec.template) restoreSpec.template = {};
+  if (!restoreSpec.template.attributes) restoreSpec.template.attributes = {};
+  restoreSpec.template.attributes['controller.devfile.io/restore-workspace'] = 'true';
+
+  // Avoid git clone overwriting restored /projects content.
+  if (restoreSpec.template.projects) {
+    delete restoreSpec.template.projects;
+  }
+
+  // postStart seeds backup content on the initial workspace only; skip on restore.
+  for (const component of restoreSpec.template.components || []) {
+    const container = component.container;
+    if (!container?.lifecycle?.postStart) {
+      continue;
+    }
+    delete container.lifecycle.postStart;
+    if (Object.keys(container.lifecycle).length === 0) {
+      delete container.lifecycle;
+    }
+  }
+
+  restoreSpec.started = true;
+  return restoreSpec;
+}
+
+function deleteWorkspacePvcs(namespace, workspaceId) {
+  if (!workspaceId) {
+    return;
+  }
+
+  const labelSelector = encodeURIComponent(`controller.devfile.io/devworkspace_id=${workspaceId}`);
+  const listUrl = `${apiServer}/api/v1/namespaces/${namespace}/persistentvolumeclaims?labelSelector=${labelSelector}`;
+  const listRes = http.get(listUrl, {headers});
+  if (listRes.status !== 200) {
+    console.warn(`  ⚠️  Failed to list PVCs for workspace ${workspaceId}: HTTP ${listRes.status}`);
+    return;
+  }
+
+  const pvcs = JSON.parse(listRes.body).items || [];
+  for (const pvc of pvcs) {
+    const pvcName = pvc.metadata.name;
+    const delUrl = `${apiServer}/api/v1/namespaces/${namespace}/persistentvolumeclaims/${pvcName}`;
+    const delRes = http.del(delUrl, null, {headers});
+    if (delRes.status === 200 || delRes.status === 202) {
+      console.log(`  Deleted PVC ${namespace}/${pvcName} before restore`);
+    } else {
+      console.warn(`  ⚠️  Failed to delete PVC ${namespace}/${pvcName}: HTTP ${delRes.status}`);
+    }
+  }
+}
+
 function captureRestoreFailureLogs(namespace, workspaceName) {
   try {
     // Get pod for the failed workspace
@@ -1164,30 +1217,33 @@ function captureRestoreFailureLogs(namespace, workspaceName) {
     const podName = pods[0].metadata.name;
     console.log(`[DEBUG] Found pod: ${podName}`);
 
-    // Try to get restore initContainer logs
-    const logUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}/log?container=devworkspace-backup-restore&tailLines=20`;
-    const logRes = http.get(logUrl, {headers});
+    const restoreContainerNames = ['workspace-restore', 'devworkspace-backup-restore'];
+    for (const containerName of restoreContainerNames) {
+      const logUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}/log?container=${containerName}&tailLines=50`;
+      const logRes = http.get(logUrl, {headers});
 
-    if (logRes.status === 200) {
-      const logs = logRes.body.split('\n').filter(l => l.trim());
-      console.log(`\n--- Restore Logs for ${namespace}/${workspaceName} ---`);
-      logs.forEach(line => console.log(line));
-      console.log(`--- End Restore Logs ---\n`);
-    } else {
-      console.log(`[DEBUG] Failed to get logs: HTTP ${logRes.status}`);
+      if (logRes.status === 200) {
+        const logs = logRes.body.split('\n').filter(l => l.trim());
+        console.log(`\n--- Restore Logs (${containerName}) for ${namespace}/${workspaceName} ---`);
+        logs.forEach(line => console.log(line));
+        console.log(`--- End Restore Logs ---\n`);
+        return;
+      }
+    }
 
-      // Try to get pod status for additional context
-      const podUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}`;
-      const podRes = http.get(podUrl, {headers});
-      if (podRes.status === 200) {
-        const pod = JSON.parse(podRes.body);
-        const initContainers = pod.status?.initContainerStatuses || [];
-        const restoreContainer = initContainers.find(c => c.name === 'devworkspace-backup-restore');
-        if (restoreContainer) {
-          console.log(`[DEBUG] Container state: ${JSON.stringify(restoreContainer.state)}`);
-          if (restoreContainer.state?.terminated?.message) {
-            console.log(`Termination: ${restoreContainer.state.terminated.message}`);
-          }
+    console.log(`[DEBUG] Failed to get restore init container logs: HTTP 400`);
+
+    // Try to get pod status for additional context
+    const podUrl = `${apiServer}/api/v1/namespaces/${namespace}/pods/${podName}`;
+    const podRes = http.get(podUrl, {headers});
+    if (podRes.status === 200) {
+      const pod = JSON.parse(podRes.body);
+      const initContainers = pod.status?.initContainerStatuses || [];
+      const restoreContainer = initContainers.find(c => restoreContainerNames.includes(c.name));
+      if (restoreContainer) {
+        console.log(`[DEBUG] Container state: ${JSON.stringify(restoreContainer.state)}`);
+        if (restoreContainer.state?.terminated?.message) {
+          console.log(`Termination: ${restoreContainer.state.terminated.message}`);
         }
       }
     }
@@ -1219,17 +1275,16 @@ function verifyWorkspaceRestore(backedUpWorkspaces) {
   http.batch(deleteRequests);
   sleep(5);
 
+  console.log(`\nDeleting workspace PVCs before restore...`);
+  for (const ws of samplesToRestore) {
+    deleteWorkspacePvcs(ws.namespace, ws.workspaceId);
+  }
+  sleep(10);
+
   // STEP 2: Create all workspaces in parallel
   console.log(`\nStep 2: Creating ${samplesToRestore.length} restored workspaces in parallel...`);
   const createRequests = samplesToRestore.map(workspace => {
-    const restoreSpec = JSON.parse(JSON.stringify(workspace.originalSpec));
-    if (!restoreSpec.template) restoreSpec.template = {};
-    if (!restoreSpec.template.attributes) restoreSpec.template.attributes = {};
-    restoreSpec.template.attributes['controller.devfile.io/restore-workspace'] = 'true';
-
-    // Remove projects to avoid git clone overwriting restore
-    if (restoreSpec.template.projects) delete restoreSpec.template.projects;
-    restoreSpec.started = true;
+    const restoreSpec = prepareRestoreSpec(workspace.originalSpec);
 
     // Preserve original labels to ensure cleanup finds these workspaces
     const metadata = {
