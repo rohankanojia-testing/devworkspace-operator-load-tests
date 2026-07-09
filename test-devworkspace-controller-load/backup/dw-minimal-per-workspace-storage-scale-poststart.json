@@ -32,7 +32,7 @@
             "volumeMounts": [
               {
                 "name": "workspace-storage",
-                "path": "/projects"
+                "path": "/workspace"
               }
             ],
             "lifecycle": {
@@ -41,7 +41,7 @@
                   "command": [
                     "/bin/sh",
                     "-c",
-                    "mkdir -p /projects/loadtest && echo backup-marker > /projects/loadtest/marker.txt"
+                    "mkdir -p /workspace/projects/loadtest && echo backup-marker > /workspace/projects/loadtest/marker.txt"
                   ]
                 }
               }

@@ -5,7 +5,7 @@
 BACKUP_DEFAULTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_REPO_ROOT="$(cd "${BACKUP_DEFAULTS_DIR}/../.." && pwd)"
 
-# Scale-optimized: no git (no project-clone init), PVC at /projects, postStart seeds backup content.
+# Scale-optimized: no git (no project-clone init), PVC at /workspace/projects, postStart seeds backup content.
 BACKUP_DEVWORKSPACE_TEMPLATE_DEFAULT="${BACKUP_REPO_ROOT}/test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale-poststart.json"
 
 # Git-backed scale template (100m project-clone CPU); use for comparison or if postStart is unsuitable.

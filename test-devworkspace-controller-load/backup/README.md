@@ -421,11 +421,12 @@ backed up or the configured `--backup-wait-minutes` expires.
 
 Backup tests require **per-workspace persistent storage** (not ephemeral). The default template is
 [`dw-minimal-per-workspace-storage-scale-poststart.json`](dw-minimal-per-workspace-storage-scale-poststart.json)
-(no git / no `project-clone` init, PVC mounted at `/projects`, `postStart` seeds `loadtest/marker.txt`).
+(no git / no `project-clone` init, PVC mounted at `/workspace`, `postStart` seeds
+`/workspace/projects/loadtest/marker.txt` — the path DWO backup jobs archive).
 
 | | Legacy gist | Git scale | **PostStart (default)** | Controller load test |
 |--|-------------|-----------|-------------------------|----------------------|
-| Storage | per-workspace PVC | per-workspace PVC | per-workspace PVC @ `/projects` | ephemeral |
+| Storage | per-workspace PVC | per-workspace PVC | per-workspace PVC @ `/workspace/projects` | ephemeral |
 | Main CPU request | 100m | 10m | **10m** | 10m |
 | Scheduling CPU | ~100m | **~100m** (project-clone) | **~10m** | ~10m |
 | Memory request | 256Mi | 64Mi | **32Mi** | 16Mi |
@@ -435,6 +436,10 @@ Backup tests require **per-workspace persistent storage** (not ephemeral). The d
 At 2500 workspaces on a 4-node perflab cluster, the git scale template leaves pods unschedulable
 (`Insufficient cpu`) because `project-clone` requests 100m. The postStart template avoids that init
 container while still providing archivable `/projects` content for backup and restore.
+
+DWO backup jobs mount the workspace PVC at `/workspace` and archive `/workspace/projects`.
+The postStart template must therefore create a `projects/` directory on the PVC root (not mount
+the PVC directly at `/projects` in the workspace pod).
 
 Override the template:
 
@@ -456,7 +461,8 @@ Or pass `--devworkspace-link` through `runk6.sh` (supports `https://` URLs or a 
 ```
 
 Then scale 250 → 500 → 2500 and confirm restore samples reach Running. Optionally verify restored
-content: `kubectl exec -n <ns> <pod> -- cat /projects/loadtest/marker.txt`.
+content: `kubectl exec -n <ns> <pod> -- cat /workspace/projects/loadtest/marker.txt`
+(after restore, content appears at `/projects/loadtest/marker.txt`).
 
 ## Notes
 
