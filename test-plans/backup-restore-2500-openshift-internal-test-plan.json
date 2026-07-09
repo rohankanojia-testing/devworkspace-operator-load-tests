@@ -1,0 +1,12 @@
+{
+  "description": "Performance Labs — 2500 workspaces, openshift-internal registry, separate namespaces (git template + DWOC projectClone tuning)",
+  "tests": [],
+  "custom_tests": [
+    {
+      "name": "backup_2500_separate_ns_internal",
+      "enabled": true,
+      "description": "2500 workspaces - Separate namespaces + OpenShift internal registry (correct)",
+      "args": "--mode binary --max-vus 350 --max-devworkspaces 2500 --delete-devworkspace-after-ready false --separate-namespaces true --devworkspace-ready-timeout-seconds 3000 --test-duration-minutes 70 --run-backup-test-hook true --dwoc-config-type openshift-internal --registry-path \"image-registry.openshift-image-registry.svc:5000\" --registry-secret \"\" --backup-wait-minutes 80"
+    }
+  ]
+}
