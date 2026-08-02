@@ -84,7 +84,7 @@ REPO_DIR="$(git rev-parse --show-toplevel 2>/dev/null)" || REPO_DIR=""
 if [[ -z "${REPO_DIR}" ]] \
    || [[ ! -f "${REPO_DIR}/scripts/run_all_loadtests.sh" ]] \
    || [[ ! -d "${REPO_DIR}/test-plans" ]] \
-   || [[ ! -f "${REPO_DIR}/.skills/run-loadtest/SKILL.md" ]]; then
+   || [[ ! -f "${REPO_DIR}/.claude/skills/run-loadtest/SKILL.md" ]]; then
   echo "❌ Not in the load-testing repository"
   exit 1
 fi
