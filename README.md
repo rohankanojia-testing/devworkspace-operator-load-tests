@@ -325,6 +325,22 @@ oc login <cluster-api-url> -u kubeadmin -p <password>   # cluster bot
 ```bash
 export PERFLAB_USER=your-username
 export PERFLAB_HOST=perflab.example.com
+# Optional: export REMOTE_REPO=/home/devworkspace-operator-load-tests
+```
+
+**Performance Labs script (SSH + tmux):**
+```bash
+# Start controller suite (default plan: controller-test-plan.json)
+./scripts/run-perflab-loadtest.sh start --kill-existing
+
+# Or a specific plan / type
+./scripts/run-perflab-loadtest.sh start --plan test-plans/1500-single-only-test-plan.json --kill-existing
+./scripts/run-perflab-loadtest.sh start --type webhook --kill-existing
+
+./scripts/run-perflab-loadtest.sh status
+./scripts/run-perflab-loadtest.sh attach
+./scripts/run-perflab-loadtest.sh collect   # parse + scp results to ./outputs/
+./scripts/run-perflab-loadtest.sh stop
 ```
 
 **Manual monitoring (optional):**
@@ -335,6 +351,7 @@ tail -f outputs/loadtest_current.log
 
 # Performance Labs (remote tmux)
 ssh -t $PERFLAB_USER@$PERFLAB_HOST "tmux attach-session -t loadtest"
+# Or: ./scripts/run-perflab-loadtest.sh status
 ```
 
 See `.skills/run-loadtest/SKILL.md` for complete documentation.
