@@ -344,17 +344,22 @@ export function checkDevWorkspaceOperatorMetrics(apiServer, headers, operatorNam
  * @param {string} etcdPodSelector - Label selector for etcd pods
  * @param {Object} initialEtcdRestarts - Initial restart counts to subtract (optional)
  */
-export function checkEtcdMetrics(apiServer, headers, etcdNamespace, etcdPodPattern, metrics, etcdPodRestarts, etcdPodSelector, initialEtcdRestarts = {}) {
+/**
+ * Collect CPU/memory from the main "etcd" container on each real etcd member pod.
+ * Excludes *guard* pods and sidecars (etcd-readyz, etcd-rev, etc.).
+ * @returns {Array<{name: string, cpuMillicores: number, memoryBytes: number}>}
+ */
+function getEtcdContainerUsages(apiServer, headers, etcdNamespace, etcdPodPattern) {
     if (!etcdNamespace || !etcdPodPattern) {
         console.warn(`[ETCD METRICS] Variables not initialized: etcdNamespace=${etcdNamespace}, etcdPodPattern=${etcdPodPattern}`);
-        return;
+        return [];
     }
 
     const metricsUrl = `${apiServer}/apis/metrics.k8s.io/v1beta1/namespaces/${etcdNamespace}/pods`;
     const res = http.get(metricsUrl, {headers});
 
     if (res.status !== 200) {
-        return;
+        return [];
     }
 
     const data = JSON.parse(res.body);
@@ -371,9 +376,10 @@ export function checkEtcdMetrics(apiServer, headers, etcdNamespace, etcdPodPatte
         } else {
             console.warn(`[ETCD METRICS] No pods found in namespace '${etcdNamespace}'`);
         }
-        return;
+        return [];
     }
 
+    const usages = [];
     for (const pod of etcdPods) {
         if (!pod.containers || pod.containers.length === 0) {
             console.warn(`[ETCD METRICS] Pod ${pod.metadata.name} has no containers`);
@@ -395,11 +401,47 @@ export function checkEtcdMetrics(apiServer, headers, etcdNamespace, etcdPodPatte
             continue;
         }
 
-        const cpu = parseCpuToMillicores(container.usage.cpu);
-        const memory = parseMemoryToBytes(container.usage.memory);
+        usages.push({
+            name,
+            cpuMillicores: parseCpuToMillicores(container.usage.cpu),
+            memoryBytes: parseMemoryToBytes(container.usage.memory),
+        });
+    }
+    return usages;
+}
 
-        metrics.etcdCpu.add(cpu);
-        metrics.etcdMemory.add(memory / 1024 / 1024);
+/**
+ * Record a pre-test etcd CPU/memory baseline (mean across etcd member pods).
+ * Call from setup() before VUs start so during-test averages can be compared as a delta.
+ * @param {Object} baselineMetrics - { etcdCpu: Gauge, etcdMemory: Gauge }
+ * @returns {{avgCpuMillicores: number, avgMemoryMiB: number, podCount: number}|null}
+ */
+export function recordBaselineEtcdMetrics(apiServer, headers, etcdNamespace, etcdPodPattern, baselineMetrics) {
+    const usages = getEtcdContainerUsages(apiServer, headers, etcdNamespace, etcdPodPattern);
+    if (usages.length === 0) {
+        console.warn('[BASELINE] Skipping etcd baseline — no usable etcd container metrics');
+        return null;
+    }
+
+    const avgCpu = usages.reduce((sum, u) => sum + u.cpuMillicores, 0) / usages.length;
+    const avgMemMiB = usages.reduce((sum, u) => sum + u.memoryBytes, 0) / usages.length / 1024 / 1024;
+
+    baselineMetrics.etcdCpu.add(avgCpu);
+    baselineMetrics.etcdMemory.add(avgMemMiB);
+
+    console.log(
+        `[BASELINE] etcd cpu=${avgCpu.toFixed(1)}m memory=${avgMemMiB.toFixed(1)}Mi ` +
+        `(mean across ${usages.length} member pod(s))`
+    );
+    return { avgCpuMillicores: avgCpu, avgMemoryMiB: avgMemMiB, podCount: usages.length };
+}
+
+export function checkEtcdMetrics(apiServer, headers, etcdNamespace, etcdPodPattern, metrics, etcdPodRestarts, etcdPodSelector, initialEtcdRestarts = {}) {
+    const usages = getEtcdContainerUsages(apiServer, headers, etcdNamespace, etcdPodPattern);
+
+    for (const usage of usages) {
+        metrics.etcdCpu.add(usage.cpuMillicores);
+        metrics.etcdMemory.add(usage.memoryBytes / 1024 / 1024);
     }
 
     checkPodRestarts(apiServer, headers, etcdNamespace, etcdPodSelector, etcdPodRestarts, initialEtcdRestarts);
@@ -580,6 +622,8 @@ export function formatBackupMetricsSummary(data, options = {}) {
         formatCountLine(data, 'operator_cpu_violations', 'operator_cpu_violations'),
         formatCountLine(data, 'operator_mem_violations', 'operator_mem_violations'),
         formatCountLine(data, 'operator_pod_restarts_total', 'operator_pod_restarts_total'),
+        formatGaugeLine(data, 'baseline_etcd_cpu', 'baseline_etcd_cpu (milliCPU)'),
+        formatGaugeLine(data, 'baseline_etcd_memory', 'baseline_etcd_memory (MiB)'),
         formatTrendLine(data, 'average_etcd_cpu', 'average_etcd_cpu', 'milliCPU'),
         formatTrendLine(data, 'average_etcd_memory', 'average_etcd_memory', 'MiB'),
         formatCountLine(data, 'etcd_pod_restarts_total', 'etcd_pod_restarts_total'),

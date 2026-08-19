@@ -24,6 +24,7 @@ import {
   detectClusterType,
   checkDevWorkspaceOperatorMetrics,
   checkEtcdMetrics,
+  recordBaselineEtcdMetrics,
   createFilteredSummaryData,
   formatBackupMetricsSummary,
 } from '../../common/utils.js';
@@ -127,6 +128,8 @@ const operatorCpu = new Trend('average_operator_cpu');
 const operatorMemory = new Trend('average_operator_memory');
 const etcdCpu = new Trend('average_etcd_cpu');
 const etcdMemory = new Trend('average_etcd_memory');
+const baselineEtcdCpu = new Gauge('baseline_etcd_cpu');
+const baselineEtcdMemory = new Gauge('baseline_etcd_memory');
 const operatorCpuViolations = new Counter('operator_cpu_violations');
 const operatorMemViolations = new Counter('operator_mem_violations');
 const operatorPodRestarts = new Gauge('operator_pod_restarts_total');
@@ -153,6 +156,11 @@ export function setup() {
   const clusterInfo = detectClusterType(apiServer, headers);
   ETCD_NAMESPACE = clusterInfo.etcdNamespace;
   ETCD_POD_NAME_PATTERN = clusterInfo.etcdPodPattern;
+
+  recordBaselineEtcdMetrics(apiServer, headers, ETCD_NAMESPACE, ETCD_POD_NAME_PATTERN, {
+    etcdCpu: baselineEtcdCpu,
+    etcdMemory: baselineEtcdMemory,
+  });
 
   return {
     startTime: Date.now(),
@@ -1459,6 +1467,8 @@ export function handleSummary(data) {
     'average_operator_memory',
     'operator_pod_restarts_total',
     'etcd_pod_restarts_total',
+    'baseline_etcd_cpu',
+    'baseline_etcd_memory',
     'average_etcd_cpu',
     'average_etcd_memory',
   ];

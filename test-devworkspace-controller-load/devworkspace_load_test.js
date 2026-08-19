@@ -30,6 +30,7 @@ import {
   detectClusterType,
   checkDevWorkspaceOperatorMetrics,
   checkEtcdMetrics,
+  recordBaselineEtcdMetrics,
   createFilteredSummaryData,
 } from '../common/utils.js';
 
@@ -141,6 +142,8 @@ const operatorCpu = new Trend('average_operator_cpu'); // in milli cores
 const operatorMemory = new Trend('average_operator_memory'); // in Mi
 const etcdCpu = new Trend('average_etcd_cpu'); // in milli cores
 const etcdMemory = new Trend('average_etcd_memory'); // in Mi
+const baselineEtcdCpu = new Gauge('baseline_etcd_cpu'); // milli cores before VUs start
+const baselineEtcdMemory = new Gauge('baseline_etcd_memory'); // MiB before VUs start
 const devworkspacesCreated = new Counter('devworkspace_create_count');
 const operatorCpuViolations = new Counter('operator_cpu_violations');
 const operatorMemViolations = new Counter('operator_mem_violations');
@@ -154,6 +157,12 @@ export function setup() {
   const clusterInfo = detectClusterType(apiServer, headers);
   ETCD_NAMESPACE = clusterInfo.etcdNamespace;
   ETCD_POD_NAME_PATTERN = clusterInfo.etcdPodPattern;
+
+  // Capture etcd CPU/memory before load so during-test averages can be compared as a delta.
+  recordBaselineEtcdMetrics(apiServer, headers, ETCD_NAMESPACE, ETCD_POD_NAME_PATTERN, {
+    etcdCpu: baselineEtcdCpu,
+    etcdMemory: baselineEtcdMemory,
+  });
 
   if (shouldCreateAutomountResources) {
     createNewAutomountConfigMap();
@@ -234,6 +243,8 @@ export function handleSummary(data) {
     'average_operator_memory',
     'operator_pod_restarts_total',
     'etcd_pod_restarts_total',
+    'baseline_etcd_cpu',
+    'baseline_etcd_memory',
     'average_etcd_cpu',
     'average_etcd_memory'
   ];

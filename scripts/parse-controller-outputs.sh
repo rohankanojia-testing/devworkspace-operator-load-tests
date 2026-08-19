@@ -50,7 +50,7 @@ CSV_FILE="controller_load_test_results.csv"
 
 # Create CSV header if file doesn't exist
 if [[ ! -f "$CSV_FILE" ]]; then
-    echo "DevWorkspaces Created,DevWorkspace Ready,Ready Failed (%),Average CPU (milliCPU),Average Memory (MiB),Create Duration (Avg ms),Ready Duration (Avg ms),CPU Violations,Memory Violations,Average Etcd CPU (milliCPU),Average Etcd Memory (MiB),Namespace" > "$CSV_FILE"
+    echo "DevWorkspaces Created,DevWorkspace Ready,Ready Failed (%),Average CPU (milliCPU),Average Memory (MiB),Create Duration (Avg ms),Ready Duration (Avg ms),CPU Violations,Memory Violations,Baseline Etcd CPU (milliCPU),Baseline Etcd Memory (MiB),Average Etcd CPU (milliCPU),Average Etcd Memory (MiB),Namespace" > "$CSV_FILE"
     echo "Created new CSV file: $CSV_FILE"
 else
     echo "Appending to existing CSV file: $CSV_FILE"
@@ -64,6 +64,21 @@ extract_avg() {
         for (i=1; i<=NF; i++) {
             if ($i ~ /^avg=/) {
                 printf "%s", substr($i, 5)
+                exit
+            }
+        }
+        printf "0"
+    }'
+}
+
+# Function to extract gauge value (k6 prints value as first number, or min=/max=)
+extract_gauge() {
+    local input="$1"
+    local gauge_name="$2"
+    echo "$input" | grep -E "^\s*✓?\s*✗?\s*$gauge_name" | head -1 | awk '{
+        for (i=1; i<=NF; i++) {
+            if ($i ~ /^[0-9]+(\.[0-9]+)?$/ && $(i+1) !~ /^\/s$/) {
+                printf "%s", $i
                 exit
             }
         }
@@ -181,7 +196,9 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     OP_CPU_VIOL=$(extract_counter "$INPUT" "operator_cpu_violations" || echo "0")
     OP_MEM_VIOL=$(extract_counter "$INPUT" "operator_mem_violations" || echo "0")
 
-    # Extract ETCD metrics (avg values)
+    # Extract ETCD metrics (baseline + during-test avg)
+    BASELINE_ETCD_CPU=$(extract_gauge "$INPUT" "baseline_etcd_cpu" || echo "0")
+    BASELINE_ETCD_MEM=$(extract_gauge "$INPUT" "baseline_etcd_memory" || echo "0")
     AVG_ETCD_CPU=$(extract_avg "$INPUT" "average_etcd_cpu" || echo "0")
     AVG_ETCD_MEM=$(extract_avg "$INPUT" "average_etcd_memory" || echo "0")
 
@@ -195,6 +212,8 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     AVG_READY_DUR=${AVG_READY_DUR:-0}
     OP_CPU_VIOL=${OP_CPU_VIOL:-0}
     OP_MEM_VIOL=${OP_MEM_VIOL:-0}
+    BASELINE_ETCD_CPU=${BASELINE_ETCD_CPU:-0}
+    BASELINE_ETCD_MEM=${BASELINE_ETCD_MEM:-0}
     AVG_ETCD_CPU=${AVG_ETCD_CPU:-0}
     AVG_ETCD_MEM=${AVG_ETCD_MEM:-0}
 
@@ -204,7 +223,7 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     fi
 
     # Build CSV row
-    CSV_ROW="$DW_CREATE_COUNT,$DW_READY_COUNT,$READY_FAILED_PCT,$AVG_OP_CPU,$AVG_OP_MEM,$AVG_CREATE_DUR,$AVG_READY_DUR,$OP_CPU_VIOL,$OP_MEM_VIOL,$AVG_ETCD_CPU,$AVG_ETCD_MEM,$NAMESPACE_MODE"
+    CSV_ROW="$DW_CREATE_COUNT,$DW_READY_COUNT,$READY_FAILED_PCT,$AVG_OP_CPU,$AVG_OP_MEM,$AVG_CREATE_DUR,$AVG_READY_DUR,$OP_CPU_VIOL,$OP_MEM_VIOL,$BASELINE_ETCD_CPU,$BASELINE_ETCD_MEM,$AVG_ETCD_CPU,$AVG_ETCD_MEM,$NAMESPACE_MODE"
 
     # Append to CSV
     echo "$CSV_ROW" >> "$CSV_FILE"
