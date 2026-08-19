@@ -307,8 +307,11 @@ export function checkDevWorkspaceOperatorMetrics(apiServer, headers, operatorNam
     const operatorPods = data.items.filter(p => p.metadata.name.includes("devworkspace-controller"));
 
     for (const pod of operatorPods) {
-        const container = pod.containers[0];
         const name = pod.metadata.name;
+        // Target the main controller container. Some DWO builds add a
+        // kube-rbac-proxy sidecar, and metrics.k8s.io does not guarantee a stable
+        // container order, so containers[0] can sample the wrong container.
+        const container = pod.containers.find(c => c.name === 'devworkspace-controller') || pod.containers[0];
 
         const cpu = parseCpuToMillicores(container.usage.cpu);
         const memory = parseMemoryToBytes(container.usage.memory);
@@ -355,7 +358,11 @@ export function checkEtcdMetrics(apiServer, headers, etcdNamespace, etcdPodPatte
     }
 
     const data = JSON.parse(res.body);
-    const etcdPods = data.items.filter(p => p.metadata.name.includes(etcdPodPattern));
+    // On HA control planes the name filter also matches etcd-guard-* pods (a single
+    // ~0.7 MiB "guard" container) and etcd-quorum-guard, which would pollute the
+    // averages. Exclude any "*guard*" pod so only real etcd members are sampled.
+    const etcdPods = data.items.filter(p =>
+        p.metadata.name.includes(etcdPodPattern) && !p.metadata.name.includes('guard'));
 
     if (etcdPods.length === 0) {
         if (data.items && data.items.length > 0) {
@@ -372,8 +379,13 @@ export function checkEtcdMetrics(apiServer, headers, etcdNamespace, etcdPodPatte
             console.warn(`[ETCD METRICS] Pod ${pod.metadata.name} has no containers`);
             continue;
         }
-        const container = pod.containers[0];
         const name = pod.metadata.name;
+        // The etcd pod runs multiple containers on OpenShift (etcd, etcd-metrics,
+        // etcd-readyz, etcd-rev, etcdctl). The metrics.k8s.io response does not
+        // guarantee a stable container order, so picking containers[0] samples a
+        // random container (usually a tiny sidecar). Select the main "etcd"
+        // container explicitly; fall back to containers[0] only if it's absent.
+        const container = pod.containers.find(c => c.name === 'etcd') || pod.containers[0];
 
         if (!container.usage?.cpu || !container.usage?.memory) {
             console.warn(
