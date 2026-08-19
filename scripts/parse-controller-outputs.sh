@@ -117,21 +117,16 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     # Extract test parameters from filename
     # Expected formats:
     #   1500_single_ns_40m.log or 1500_separate_ns_60m.log (with duration)
+    #   1500_separate_ns_30vus_40m.log (optional VU count + duration)
     #   3000_single_ns.log or 2000_separate_ns.log (without duration)
     MAX_DWS=""
     NAMESPACE_MODE=""
     DURATION=""
 
-    if [[ "$FILENAME" =~ ^([0-9]+)_(single|separate)_ns_([0-9]+)m\.log$ ]]; then
-        # Format with duration: 1500_single_ns_40m.log
+    if [[ "$FILENAME" =~ ^([0-9]+)_(single|separate)_ns(_([0-9]+)vus)?(_([0-9]+)m)?\.log$ ]]; then
         MAX_DWS="${BASH_REMATCH[1]}"
         NAMESPACE_MODE="${BASH_REMATCH[2]}"
-        DURATION="${BASH_REMATCH[3]}"
-    elif [[ "$FILENAME" =~ ^([0-9]+)_(single|separate)_ns\.log$ ]]; then
-        # Format without duration: 3000_single_ns.log
-        MAX_DWS="${BASH_REMATCH[1]}"
-        NAMESPACE_MODE="${BASH_REMATCH[2]}"
-        DURATION=""  # Will try to extract from log content
+        DURATION="${BASH_REMATCH[6]:-}"
     else
         # Try to extract from log content (BSD-compatible)
         MAX_DWS=$(grep -o 'max-devworkspaces [0-9]\+' "$LOG_FILE" | head -1 | awk '{print $2}' || echo "")
