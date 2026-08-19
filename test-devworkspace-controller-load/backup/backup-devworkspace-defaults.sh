@@ -6,10 +6,10 @@ BACKUP_DEFAULTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_REPO_ROOT="$(cd "${BACKUP_DEFAULTS_DIR}/../.." && pwd)"
 
 # Git-backed scale template (default): DWOC projectClone tuning lowers init CPU from 100m to 10m.
-BACKUP_DEVWORKSPACE_TEMPLATE_DEFAULT="${BACKUP_REPO_ROOT}/test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale.json"
+BACKUP_DEVWORKSPACE_TEMPLATE_DEFAULT="${BACKUP_REPO_ROOT}/common/templates/dw-minimal-per-workspace-storage-scale.json"
 
 # PostStart scale template: no project-clone init; seeds /projects via lifecycle hook.
-BACKUP_DEVWORKSPACE_TEMPLATE_POSTSTART="${BACKUP_REPO_ROOT}/test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale-poststart.json"
+BACKUP_DEVWORKSPACE_TEMPLATE_POSTSTART="${BACKUP_REPO_ROOT}/common/templates/dw-minimal-per-workspace-storage-scale-poststart.json"
 
 # Alias for explicit git template selection.
 BACKUP_DEVWORKSPACE_TEMPLATE_GIT="${BACKUP_DEVWORKSPACE_TEMPLATE_DEFAULT}"

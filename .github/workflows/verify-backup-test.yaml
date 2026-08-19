@@ -81,7 +81,7 @@ jobs:
           RANDOM_ID="backup-test-${{ github.run_id }}-$(date +%s)"
           # CI validates external-registry backup+restore with the git-backed template.
           # PostStart scale template is the default for load tests (see backup-devworkspace-defaults.sh).
-          export BACKUP_DEVWORKSPACE_TEMPLATE="${GITHUB_WORKSPACE}/test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale.json"
+          export BACKUP_DEVWORKSPACE_TEMPLATE="${GITHUB_WORKSPACE}/common/templates/dw-minimal-per-workspace-storage-scale.json"
           make test_backup \
             MAX_DEVWORKSPACES=1 \
             BACKUP_MONITOR_DURATION=5 \

@@ -12,8 +12,8 @@ WEBHOOK_NAMESPACE="${WEBHOOK_NAMESPACE:-openshift-operators}"
 DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS="${DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS:-7200}"
 # Local template (avoids gist.githubusercontent.com timeouts under VU load).
 # Override with --devworkspace-link or DEVWORKSPACE_LINK=https://... if needed.
-_WEBHOOK_RUNK6_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVWORKSPACE_LINK="${DEVWORKSPACE_LINK:-${_WEBHOOK_RUNK6_DIR}/dw-restricted-access-annotation.json}"
+_WEBHOOK_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEVWORKSPACE_LINK="${DEVWORKSPACE_LINK:-${_WEBHOOK_REPO_ROOT}/common/templates/dw-restricted-access-annotation.json}"
 
 DW_API_GROUP="workspace.devfile.io"
 DW_RESOURCE="devworkspaces"

@@ -18,8 +18,8 @@ K6_SCRIPT="test-devworkspace-controller-load/devworkspace_load_test.js"
 K6_OPERATOR_VERSION="v0.0.22"
 # Local template (avoids gist.githubusercontent.com timeouts under VU load).
 # Override with --devworkspace-link or DEVWORKSPACE_LINK=https://... if needed.
-_RUNK6_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVWORKSPACE_LINK="${_RUNK6_DIR}/dw-minimal.json"
+_RUNK6_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEVWORKSPACE_LINK="${_RUNK6_REPO_ROOT}/common/templates/dw-minimal.json"
 MAX_VUS="${MAX_VUS:-100}"
 DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS="3600"
 SEPARATE_NAMESPACES="false"

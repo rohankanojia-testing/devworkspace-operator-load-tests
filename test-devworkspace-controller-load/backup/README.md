@@ -420,7 +420,7 @@ backed up or the configured `--backup-wait-minutes` expires.
 ## DevWorkspace template for backup tests
 
 Backup tests require **per-workspace persistent storage** (not ephemeral). The default template is
-[`dw-minimal-per-workspace-storage-scale.json`](dw-minimal-per-workspace-storage-scale.json)
+[`dw-minimal-per-workspace-storage-scale.json`](../../common/templates/dw-minimal-per-workspace-storage-scale.json)
 (git hello-world). Backup setup also patches **DWOC `projectClone` resources** to **10m CPU / 32Mi**
 (init default is 100m / 128Mi).
 
@@ -444,7 +444,7 @@ make test_backup ARGS="..."
 DWOC_PROJECT_CLONE_TUNING=false make test_backup ARGS="..."
 
 # PostStart template (no project-clone init)
-BACKUP_DEVWORKSPACE_TEMPLATE=test-devworkspace-controller-load/backup/dw-minimal-per-workspace-storage-scale-poststart.json \
+BACKUP_DEVWORKSPACE_TEMPLATE=common/templates/dw-minimal-per-workspace-storage-scale-poststart.json \
   make test_backup ARGS="..."
 ```
 

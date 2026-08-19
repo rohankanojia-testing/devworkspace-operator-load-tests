@@ -47,6 +47,7 @@ Signed-off-by: Your Name <your.email@example.com>
 
 - `test-devworkspace-controller-load/` - Controller load test scripts and k6 test files
 - `test-devworkspace-webhook-server-load/` - Webhook server load test scripts and k6 test files
+- `common/templates/` - Shared DevWorkspace YAML templates used by controller, webhook, and backup tests
 - `scripts/` - Utility scripts for running tests, data processing, and operator management
 - `test-plans/` - JSON-based test plan configurations
 - `images/` - Documentation diagrams and flow charts
