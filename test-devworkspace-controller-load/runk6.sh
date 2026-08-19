@@ -16,7 +16,10 @@ CONFIGMAP_NAME="k6-test-script"
 K6_CR_NAME="k6-test-run"
 K6_SCRIPT="test-devworkspace-controller-load/devworkspace_load_test.js"
 K6_OPERATOR_VERSION="v0.0.22"
-DEVWORKSPACE_LINK="https://gist.githubusercontent.com/rohanKanojia/ecf625afaf3fe817ac7d1db78bd967fc/raw/8c30c0370444040105ca45cd4ac0f7062a644bb7/dw-minimal.json"
+# Local template (avoids gist.githubusercontent.com timeouts under VU load).
+# Override with --devworkspace-link or DEVWORKSPACE_LINK=https://... if needed.
+_RUNK6_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEVWORKSPACE_LINK="${_RUNK6_DIR}/dw-minimal.json"
 MAX_VUS="${MAX_VUS:-100}"
 DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS="3600"
 SEPARATE_NAMESPACES="false"

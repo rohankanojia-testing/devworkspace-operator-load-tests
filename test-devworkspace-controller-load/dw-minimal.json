@@ -1,0 +1,33 @@
+{
+  "apiVersion": "workspace.devfile.io/v1alpha2",
+  "kind": "DevWorkspace",
+  "metadata": {
+    "name": "name",
+    "namespace": "namespace",
+    "labels": {
+      "labelKey": "labelType"
+    }
+  },
+  "spec": {
+    "started": true,
+    "template": {
+      "attributes": {
+        "controller.devfile.io/storage-type": "ephemeral"
+      },
+      "components": [
+        {
+          "name": "dev",
+          "container": {
+            "image": "registry.access.redhat.com/ubi9/ubi-micro:9.6-1752751762",
+            "command": ["sleep", "3600"],
+            "imagePullPolicy": "IfNotPresent",
+            "memoryLimit": "24Mi",
+            "memoryRequest": "16Mi",
+            "cpuLimit": "50m",
+            "cpuRequest": "10m"
+          }
+        }
+      ]
+    }
+  }
+}
