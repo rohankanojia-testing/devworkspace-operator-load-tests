@@ -1,0 +1,30 @@
+{
+  "apiVersion": "workspace.devfile.io/v1alpha2",
+  "kind": "DevWorkspace",
+  "metadata": {
+    "name": "dw-restricted-access",
+    "namespace": "TEST_NAMESPACE",
+    "annotations": {
+      "controller.devfile.io/restricted-access": "true"
+    },
+    "labels": {
+      "console.openshift.io/terminal": "true"
+    }
+  },
+  "spec": {
+    "started": true,
+    "routingClass": "web-terminal",
+    "template": {
+      "components": [
+        {
+          "name": "restricted-access-container",
+          "container": {
+            "image": "quay.io/wto/web-terminal-tooling:latest",
+            "mountSources": false,
+            "args": ["tail", "-f", "/dev/null"]
+          }
+        }
+      ]
+    }
+  }
+}
