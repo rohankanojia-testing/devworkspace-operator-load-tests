@@ -11,9 +11,11 @@ LOAD_TEST_NAMESPACE="${LOAD_TEST_NAMESPACE:-dw-webhook-loadtest}"
 WEBHOOK_NAMESPACE="${WEBHOOK_NAMESPACE:-openshift-operators}"
 DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS="${DEV_WORKSPACE_READY_TIMEOUT_IN_SECONDS:-7200}"
 # Local template (avoids gist.githubusercontent.com timeouts under VU load).
+# Use ${VAR-default} (not :-) so DEVWORKSPACE_LINK="" from CI is preserved:
+# empty → k6 built-in opinionated DW (Minikube/Kubernetes); unset → local file.
 # Override with --devworkspace-link or DEVWORKSPACE_LINK=https://... if needed.
 _WEBHOOK_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEVWORKSPACE_LINK="${DEVWORKSPACE_LINK:-${_WEBHOOK_REPO_ROOT}/common/templates/dw-restricted-access-annotation.json}"
+DEVWORKSPACE_LINK="${DEVWORKSPACE_LINK-${_WEBHOOK_REPO_ROOT}/common/templates/dw-restricted-access-annotation.json}"
 
 DW_API_GROUP="workspace.devfile.io"
 DW_RESOURCE="devworkspaces"
