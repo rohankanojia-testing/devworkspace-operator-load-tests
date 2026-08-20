@@ -334,17 +334,6 @@ export function checkDevWorkspaceOperatorMetrics(apiServer, headers, operatorNam
 }
 
 /**
- * Check etcd metrics (CPU and memory)
- * @param {string} apiServer - Kubernetes API server URL
- * @param {Object} headers - HTTP headers with authentication
- * @param {string} etcdNamespace - ETCD namespace
- * @param {string} etcdPodPattern - ETCD pod name pattern
- * @param {Object} metrics - Metrics object with etcdCpu, etcdMemory
- * @param {Object} etcdPodRestarts - Pod restart counter metric
- * @param {string} etcdPodSelector - Label selector for etcd pods
- * @param {Object} initialEtcdRestarts - Initial restart counts to subtract (optional)
- */
-/**
  * Collect CPU/memory from the main "etcd" container on each real etcd member pod.
  * Excludes *guard* pods and sidecars (etcd-readyz, etcd-rev, etc.).
  * @returns {Array<{name: string, cpuMillicores: number, memoryBytes: number}>}
@@ -436,6 +425,17 @@ export function recordBaselineEtcdMetrics(apiServer, headers, etcdNamespace, etc
     return { avgCpuMillicores: avgCpu, avgMemoryMiB: avgMemMiB, podCount: usages.length };
 }
 
+/**
+ * Check etcd metrics (CPU and memory) and pod restarts.
+ * @param {string} apiServer - Kubernetes API server URL
+ * @param {Object} headers - HTTP headers with authentication
+ * @param {string} etcdNamespace - ETCD namespace
+ * @param {string} etcdPodPattern - ETCD pod name pattern
+ * @param {Object} metrics - Metrics object with etcdCpu, etcdMemory
+ * @param {Object} etcdPodRestarts - Pod restart counter metric
+ * @param {string} etcdPodSelector - Label selector for etcd pods
+ * @param {Object} initialEtcdRestarts - Initial restart counts to subtract (optional)
+ */
 export function checkEtcdMetrics(apiServer, headers, etcdNamespace, etcdPodPattern, metrics, etcdPodRestarts, etcdPodSelector, initialEtcdRestarts = {}) {
     const usages = getEtcdContainerUsages(apiServer, headers, etcdNamespace, etcdPodPattern);
 
