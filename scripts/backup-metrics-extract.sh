@@ -106,6 +106,41 @@ backup_metrics_extract_imagestreamtags() {
   echo "$ratio"
 }
 
+# Extract gauge value (for baseline metrics that report a single value, not avg/min/max)
+backup_metrics_extract_gauge() {
+  local input="$1"
+  local gauge_name="$2"
+
+  # Formatted summary: "  ✓ baseline_etcd_cpu .................. 42.5"
+  local formatted
+  formatted=$(echo "$input" | grep -E "[✓✗ ] ${gauge_name}[ .]+[0-9]" | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?$' || true)
+  if [[ -n "$formatted" ]]; then
+    printf '%s' "$formatted"
+    return 0
+  fi
+
+  # Legacy k6 gauge: "baseline_etcd_cpu: 42.5 min=42.5 max=42.5" or with value= prefix
+  local legacy_line
+  legacy_line=$(echo "$input" | grep -E "^\s*✓?\s*✗?\s*${gauge_name}" | head -1 || true)
+  if [[ -z "$legacy_line" ]]; then
+    echo "0"
+    return 0
+  fi
+  echo "$legacy_line" | awk '{
+    for (i=1; i<=NF; i++) {
+      if ($i ~ /^value=/) {
+        printf "%s", substr($i, 7)
+        exit
+      }
+      if ($i ~ /^[0-9]+(\.[0-9]+)?$/ && $(i+1) !~ /^\/s$/) {
+        printf "%s", $i
+        exit
+      }
+    }
+    printf "0"
+  }'
+}
+
 # Map log metrics to legacy CSV columns (Config Type, DW Target, Backup Attempted, ...)
 # Sets shell variables: BACKUP_ATTEMPTED, BACKUP_SUCCEEDED, BACKUP_PODS, BACKUP_FAILED,
 # BACKUP_JOB_DURATION, RESTORE_*, AVG_* 
@@ -149,6 +184,9 @@ backup_metrics_map_legacy_csv() {
   AVG_ETCD_CPU=$(backup_metrics_extract_avg "$input" "average_etcd_cpu")
   AVG_ETCD_MEM=$(backup_metrics_extract_avg "$input" "average_etcd_memory")
 
+  BASELINE_ETCD_CPU=$(backup_metrics_extract_gauge "$input" "baseline_etcd_cpu")
+  BASELINE_ETCD_MEM=$(backup_metrics_extract_gauge "$input" "baseline_etcd_memory")
+
   # Ensure numeric defaults for CSV consumers
   BACKUP_ATTEMPTED=${BACKUP_ATTEMPTED:-0}
   BACKUP_SUCCEEDED=${BACKUP_SUCCEEDED:-0}
@@ -163,4 +201,6 @@ backup_metrics_map_legacy_csv() {
   AVG_OP_MEM=${AVG_OP_MEM:-0}
   AVG_ETCD_CPU=${AVG_ETCD_CPU:-0}
   AVG_ETCD_MEM=${AVG_ETCD_MEM:-0}
+  BASELINE_ETCD_CPU=${BASELINE_ETCD_CPU:-0}
+  BASELINE_ETCD_MEM=${BASELINE_ETCD_MEM:-0}
 }

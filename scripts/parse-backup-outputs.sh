@@ -51,7 +51,7 @@ CSV_FILE="backup_load_test_results.csv"
 
 # Create CSV header if file doesn't exist
 if [[ ! -f "$CSV_FILE" ]]; then
-    echo "Config Type,DW Target,Backup Attempted,Backup Succeeded,Backup Pods,Backup Failed,Backup Job Duration (Avg ms),Restore Total,Restore Succeeded,Restore Failed,Restore Duration (Avg ms),Average CPU (milliCPU),Average Memory (MiB),Average Etcd CPU (milliCPU),Average Etcd Memory (MiB)" > "$CSV_FILE"
+    echo "Config Type,DW Target,Backup Attempted,Backup Succeeded,Backup Pods,Backup Failed,Backup Job Duration (Avg ms),Restore Total,Restore Succeeded,Restore Failed,Restore Duration (Avg ms),Average CPU (milliCPU),Average Memory (MiB),Average Etcd CPU (milliCPU),Average Etcd Memory (MiB),Baseline Etcd CPU (milliCPU),Baseline Etcd Memory (MiB)" > "$CSV_FILE"
     echo "Created new CSV file: $CSV_FILE"
 else
     echo "Appending to existing CSV file: $CSV_FILE"
@@ -174,6 +174,8 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     AVG_OP_MEM=${AVG_OP_MEM:-0}
     AVG_ETCD_CPU=${AVG_ETCD_CPU:-0}
     AVG_ETCD_MEM=${AVG_ETCD_MEM:-0}
+    BASELINE_ETCD_CPU=${BASELINE_ETCD_CPU:-0}
+    BASELINE_ETCD_MEM=${BASELINE_ETCD_MEM:-0}
 
     # Check if any metrics were found
     if [[ "$BACKUP_ATTEMPTED" == "0" && "$BACKUP_SUCCEEDED" == "0" && "$AVG_OP_CPU" == "0" ]]; then
@@ -183,7 +185,7 @@ for LOG_FILE in "${LOG_FILES[@]}"; do
     fi
 
     # Build CSV row
-    CSV_ROW="$CONFIG_TYPE,$DW_TARGET,$BACKUP_ATTEMPTED,$BACKUP_SUCCEEDED,$BACKUP_PODS,$BACKUP_FAILED,$BACKUP_JOB_DURATION,$RESTORE_TOTAL,$RESTORE_SUCCEEDED,$RESTORE_FAILED,$RESTORE_DURATION,$AVG_OP_CPU,$AVG_OP_MEM,$AVG_ETCD_CPU,$AVG_ETCD_MEM"
+    CSV_ROW="$CONFIG_TYPE,$DW_TARGET,$BACKUP_ATTEMPTED,$BACKUP_SUCCEEDED,$BACKUP_PODS,$BACKUP_FAILED,$BACKUP_JOB_DURATION,$RESTORE_TOTAL,$RESTORE_SUCCEEDED,$RESTORE_FAILED,$RESTORE_DURATION,$AVG_OP_CPU,$AVG_OP_MEM,$AVG_ETCD_CPU,$AVG_ETCD_MEM,$BASELINE_ETCD_CPU,$BASELINE_ETCD_MEM"
 
     # Append to CSV
     echo "$CSV_ROW" >> "$CSV_FILE"
