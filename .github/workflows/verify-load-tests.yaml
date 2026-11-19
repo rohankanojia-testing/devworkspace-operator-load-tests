@@ -3,8 +3,14 @@ name: Verify Load Tests
 on:
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - 'dashboard/**'
+      - '.github/workflows/publish-dashboard.yml'
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'dashboard/**'
+      - '.github/workflows/publish-dashboard.yml'
 
 env:
   DWO_NAMESPACE: devworkspace-controller
@@ -21,8 +27,23 @@ jobs:
       - name: Check out code
         uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
 
+      # The Minikube action installs conntrack with a single apt call and fails the job
+      # if the Ubuntu mirror is briefly unreachable. Installing it here with retries
+      # makes that later call a no-op.
+      - name: Install conntrack (with retries)
+        run: |
+          for attempt in 1 2 3 4 5; do
+            sudo apt-get update || true
+            if sudo apt-get install -y conntrack; then
+              exit 0
+            fi
+            echo "apt-get install failed (attempt $attempt of 5), retrying in 20s"
+            sleep 20
+          done
+          exit 1
+
       - name: Setup Minikube-Kubernetes
-        uses: manusa/actions-setup-minikube@b589f2d61bf96695c546929c72b38563e856059d # v2.14.0
+        uses: manusa/actions-setup-minikube@001b9f30165b2a875b835ec5183ced75b94bc269 # v2.19.0
         with:
           minikube version: 'v1.38.1'
           kubernetes version: ${{ matrix.kubernetes }}
