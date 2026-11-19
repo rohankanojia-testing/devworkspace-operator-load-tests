@@ -62,7 +62,8 @@ select { background: var(--surface); border: 1px solid var(--axis); border-radiu
 (() => {
   const COUNT = 'DevWorkspaces Created', NS = 'Namespace';
   const METRICS = [
-    {col: 'Average CPU (milliCPU)', title: 'Controller CPU', unit: 'milliCPU', sub: 'Average milliCPU over the run', digits: 0},
+    // `alt` lists older names for the same column, so CSVs from earlier releases still chart.
+    {col: 'Average CPU (milliCPU)', alt: ['Average DWO CPU (milliCPU)'], title: 'Controller CPU', unit: 'milliCPU', sub: 'Average milliCPU over the run', digits: 0},
     {col: 'Average Memory (MiB)', title: 'Controller memory', unit: 'MiB', sub: 'Average MiB over the run', digits: 0},
     {col: 'Ready Duration (Avg ms)', title: 'Time to ready', unit: 's', sub: 'Average seconds until a DevWorkspace is ready', div: 1000, digits: 1},
     {col: 'Create Duration (Avg ms)', title: 'Create request duration', unit: 'ms', sub: 'Average milliseconds per create call', digits: 1},
@@ -97,7 +98,7 @@ select { background: var(--surface); border: 1px solid var(--axis); border-radiu
   function value(release, metric, count) {
     const vals = release.rows
       .filter((r) => r[NS] === state.mode && num(r[COUNT]) === count)
-      .map((r) => num(r[metric.col]))
+      .map((r) => num(r[[metric.col, ...(metric.alt || [])].find((c) => c in r)]))
       .filter((v) => v != null);
     return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length / (metric.div || 1) : null;
   }
