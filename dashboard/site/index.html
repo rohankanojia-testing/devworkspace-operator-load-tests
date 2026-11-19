@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevWorkspace Operator load tests</title>
+<style>
+:root {
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781; --grid: #2c2c2a; --axis: #383835; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+p.note { color: var(--ink-2); margin: 0 0 12px; max-width: 80ch; }
+.filters { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; margin: 16px 0; padding: 12px 16px; background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; }
+.filters > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cap { font-size: 12px; color: var(--ink-2); }
+select, .seg label { font: inherit; color: var(--ink); }
+select { background: var(--surface); border: 1px solid var(--axis); border-radius: 6px; padding: 5px 8px; }
+.seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 6px; overflow: hidden; }
+.seg label { padding: 5px 10px; cursor: pointer; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label:has(input:checked) { background: var(--grid); font-weight: 600; }
+.seg label:has(input:focus-visible) { outline: 2px solid #2a78d6; outline-offset: -2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 5px 0; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.legend i { width: 14px; height: 4px; border-radius: 2px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+.card h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.card p { font-size: 12px; color: var(--ink-2); margin: 2px 0 8px; }
+.plot { position: relative; height: 230px; }
+.empty { padding: 24px; color: var(--ink-2); background: var(--surface); border: 1px dashed var(--axis); border-radius: 8px; margin-top: 16px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>DevWorkspace Operator load tests</h1>
+  <p class="note">One chart per metric, with releases from oldest to newest along the bottom. Lower is better on every chart.</p>
+
+  <div id="empty" class="empty" hidden></div>
+
+  <div id="app" hidden>
+    <div class="filters">
+      <div><span class="cap">Namespace mode</span><div class="seg" id="mode"></div></div>
+      <div><label class="cap" for="last">Releases shown</label>
+        <select id="last"><option value="5" selected>Last 5</option><option value="10">Last 10</option><option value="0">All</option></select></div>
+      <div><span class="cap">DevWorkspaces created (one line each)</span><div class="legend" id="legend"></div></div>
+    </div>
+    <div class="grid" id="charts"></div>
+  </div>
+</main>
+
+<script src="vendor/chart.umd.min.js"></script>
+<script>
+(() => {
+  const COUNT = 'DevWorkspaces Created', NS = 'Namespace';
+  const METRICS = [
+    {col: 'Average CPU (milliCPU)', title: 'Controller CPU', unit: 'milliCPU', sub: 'Average milliCPU over the run', digits: 0},
+    {col: 'Average Memory (MiB)', title: 'Controller memory', unit: 'MiB', sub: 'Average MiB over the run', digits: 0},
+    {col: 'Ready Duration (Avg ms)', title: 'Time to ready', unit: 's', sub: 'Average seconds until a DevWorkspace is ready', div: 1000, digits: 1},
+    {col: 'Create Duration (Avg ms)', title: 'Create request duration', unit: 'ms', sub: 'Average milliseconds per create call', digits: 1},
+    {col: 'CPU Violations', title: 'CPU violations', unit: '', sub: 'Count reported by the run', digits: 0},
+    {col: 'Memory Violations', title: 'Memory violations', unit: '', sub: 'Count reported by the run', digits: 0},
+    {col: 'Average Etcd CPU (milliCPU)', title: 'Etcd CPU', unit: 'milliCPU', sub: 'Average milliCPU during the run', digits: 0},
+    {col: 'Average Etcd Memory (MiB)', title: 'Etcd memory', unit: 'MiB', sub: 'Average MiB during the run', digits: 0},
+    {col: 'Ready Failed (%)', title: 'Failed to become ready', unit: '%', sub: 'Share of DevWorkspaces that never became ready', digits: 2},
+  ];
+  // One blue ramp, light to dark, for load sizes from smallest to largest (an ordered scale, so one hue).
+  const RAMP = {
+    light: ['#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#1c5cab', '#184f95', '#104281', '#0d366b'],
+    dark: ['#cde2fb', '#b7d3f6', '#9ec5f4', '#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#1c5cab'],
+  };
+  const $ = (id) => document.getElementById(id);
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const fmt = (v, digits) => v.toLocaleString('en-US', {minimumFractionDigits: digits, maximumFractionDigits: digits});
+  const dark = matchMedia('(prefers-color-scheme: dark)');
+
+  // releases: [{name, rows}], oldest first.
+  const state = {releases: [], mode: null, last: 5};
+  const charts = [];
+
+  function parseCsv(text) {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '').map((l) => l.split(',').map((c) => c.trim().replace(/^"|"$/g, '')));
+    if (!lines.length) return [];
+    return lines.slice(1).map((r) => Object.fromEntries(lines[0].map((h, i) => [h, r[i] ?? ''])));
+  }
+
+  // Mean of a metric for one release, load size and the chosen namespace mode (repeat runs are averaged).
+  function value(release, metric, count) {
+    const vals = release.rows
+      .filter((r) => r[NS] === state.mode && num(r[COUNT]) === count)
+      .map((r) => num(r[metric.col]))
+      .filter((v) => v != null);
+    return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length / (metric.div || 1) : null;
+  }
+
+  function el(tag, props, ...kids) {
+    const n = Object.assign(document.createElement(tag), props || {});
+    n.append(...kids);
+    return n;
+  }
+
+  function render() {
+    charts.splice(0).forEach((c) => c.destroy());
+    const shown = state.last ? state.releases.slice(-state.last) : state.releases;
+    const counts = [...new Set(shown.flatMap((r) => r.rows.filter((x) => x[NS] === state.mode).map((x) => num(x[COUNT])).filter((v) => v != null)))].sort((a, b) => a - b);
+    const ramp = RAMP[dark.matches ? 'dark' : 'light'];
+    // Spread the load sizes evenly over the ramp so the smallest and largest are furthest apart.
+    const color = (i) => ramp[counts.length < 2 ? 4 : Math.round(i * (ramp.length - 1) / (counts.length - 1))];
+
+    $('legend').replaceChildren(...counts.map((c, i) => {
+      const swatch = el('i');
+      swatch.style.background = color(i);
+      return el('span', null, swatch, c.toLocaleString('en-US'));
+    }));
+
+    const tick = {color: css('--muted'), font: {size: 11}};
+    $('charts').replaceChildren(...METRICS.map((m) => {
+      const canvas = el('canvas', {role: 'img', ariaLabel: `${m.title} by release, one line per number of DevWorkspaces created, ${state.mode} namespace`});
+      const card = el('div', {className: 'card'}, el('h2', {textContent: m.title}), el('p', {textContent: m.sub}), el('div', {className: 'plot'}, canvas));
+      charts.push(new Chart(canvas, {
+        type: 'line',
+        data: {labels: shown.map((r) => r.name), datasets: counts.map((c, i) => ({
+          label: `${c.toLocaleString('en-US')} DevWorkspaces`, data: shown.map((r) => value(r, m, c)),
+          borderColor: color(i), backgroundColor: color(i), borderWidth: 2,
+          pointRadius: 4, pointHoverRadius: 6, pointBorderColor: css('--surface'), pointBorderWidth: 2,
+          tension: 0, spanGaps: true,
+        }))},
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          interaction: {mode: 'index', intersect: false},
+          plugins: {
+            legend: {display: false},
+            tooltip: {
+              itemSort: (a, b) => b.datasetIndex - a.datasetIndex,
+              callbacks: {
+                title: (items) => `Release ${items[0].label}`,
+                label: (item) => ` ${item.dataset.label}: ${fmt(item.parsed.y, m.digits)}${m.unit ? ' ' + m.unit : ''}`,
+              },
+            },
+          },
+          scales: {
+            x: {offset: true, grid: {display: false}, border: {color: css('--axis')}, ticks: tick},
+            y: {beginAtZero: true, grid: {color: css('--grid')}, border: {display: false}, ticks: {...tick, maxTicksLimit: 5}},
+          },
+        },
+      }));
+      return card;
+    }));
+  }
+
+  function buildControls() {
+    const modes = [...new Set(state.releases.flatMap((r) => r.rows.map((x) => x[NS]).filter(Boolean)))].sort();
+    if (!modes.includes(state.mode)) state.mode = modes.includes('single') ? 'single' : modes[0];
+    $('mode').replaceChildren(...modes.map((m) => {
+      const input = el('input', {type: 'radio', name: 'mode', value: m, checked: m === state.mode});
+      input.addEventListener('change', () => { state.mode = m; render(); });
+      return el('label', null, input, el('span', {textContent: m}));
+    }));
+    $('last').onchange = (e) => { state.last = +e.target.value; render(); };
+  }
+
+  function showEmpty(text) {
+    $('empty').textContent = text;
+    $('empty').hidden = false;
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('results/index.json', {cache: 'no-cache'});
+      if (!res.ok) throw new Error(`results/index.json: HTTP ${res.status}`);
+      const manifest = await res.json();
+      const loaded = await Promise.all((manifest.releases || []).map(async (r) => {
+        const csv = await fetch(r.file, {cache: 'no-cache'});
+        if (!csv.ok) throw new Error(`${r.file}: HTTP ${csv.status}`);
+        return {name: r.name, rows: parseCsv(await csv.text())};
+      }));
+      state.releases = loaded.filter((r) => r.rows.length);
+    } catch (err) {
+      showEmpty(`Could not load the results (${err.message}). Build the site with scripts/build-site.sh and serve the _site folder.`);
+      return;
+    }
+    if (!state.releases.length) {
+      showEmpty('No results yet. Commit a CSV to dashboard/results/<release>/controller_load_test_results.csv and rebuild.');
+      return;
+    }
+    $('app').hidden = false;
+    buildControls();
+    render();
+  }
+
+  dark.addEventListener('change', () => { if (state.releases.length) render(); });
+  load();
+})();
+</script>
+</body>
+</html>
