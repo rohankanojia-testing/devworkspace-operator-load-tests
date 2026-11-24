@@ -1,0 +1,10 @@
+DW Target,DevWorkspaces Created,DevWorkspace Ready,Ready Failed (%),Average CPU (milliCPU),Average Memory (MiB),Create Duration (ms),Ready Duration (ms),CPU Violations,Memory Violations,Namespace,Failures
+1000,1002,1002,0,210.21,262.27,5.92,78119.29,963,14117,Single,
+1500,1501,1501,0,271.63,428.05,5.74,181805.45,35265,54309,Single,
+2000,2002,2002,0,299.55,278,6.05,179064.87,52684,60521,Single,
+2500,2502,2501,0.04,338.83,320.77,6.01,156028.62,63982,69888,Single,Error creating DevWorkspace deployment: Container dev has state ImagePullBackOff
+,,,,,,,,,,,
+1000,1002,1002,0,105.75,514.28,6.28,156130.94,0,31184,Separate,
+1500,1501,1501,0,98.92,560.52,6.4,176387.64,0,52745,Separate,
+2000,2002,2002,0,97.66,558.98,6.52,168884.73,0,67403,Separate,
+2500,2501,2501,0,96.87,597.16,6.39,197334.83,0,98302,Separate,
