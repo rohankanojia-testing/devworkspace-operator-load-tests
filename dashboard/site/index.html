@@ -62,53 +62,55 @@ select { background: var(--surface); border: 1px solid var(--axis); border-radiu
 <script src="vendor/chart.umd.min.js"></script>
 <script>
 (() => {
-  // One entry per kind of load test. `size` is the column that says how big the run was
+  // One entry per kind of load test. `size` lists the columns that can say how big the run was
   // (one line per value); `group` is an optional column the reader switches between.
   // `alt` lists older names for the same column, so CSVs from earlier releases still chart.
   const TYPES = {
     controller: {
-      label: 'Controller', size: 'DevWorkspaces Created', sizeLabel: 'DevWorkspaces created', sizeNoun: 'DevWorkspaces',
+      label: 'Controller', size: ['DW Target', 'DevWorkspaces Created'], sizeLabel: 'DevWorkspaces created', sizeNoun: 'DevWorkspaces',
       group: 'Namespace', groupLabel: 'Namespace mode', prefer: 'single',
       metrics: [
-        {col: 'Average CPU (milliCPU)', alt: ['Average DWO CPU (milliCPU)'], title: 'Controller CPU', unit: 'milliCPU', sub: 'Average milliCPU over the run', digits: 0},
-        {col: 'Average Memory (MiB)', title: 'Controller memory', unit: 'MiB', sub: 'Average MiB over the run', digits: 0},
-        {col: 'Ready Duration (Avg ms)', title: 'Time to ready', unit: 's', sub: 'Average seconds until a DevWorkspace is ready', div: 1000, digits: 1},
-        {col: 'Create Duration (Avg ms)', title: 'Create request duration', unit: 'ms', sub: 'Average milliseconds per create call', digits: 1},
+        {col: 'Average CPU (milliCPU)', alt: ['Average DWO CPU (milliCPU)', 'Avg CPU (milliCPU)'], title: 'Controller CPU', unit: 'milliCPU', sub: 'Average milliCPU over the run', digits: 0},
+        {col: 'Average Memory (MiB)', alt: ['Avg Memory (MiB)'], title: 'Controller memory', unit: 'MiB', sub: 'Average MiB over the run', digits: 0},
+        {col: 'Ready Duration (Avg ms)', alt: ['Ready Duration (ms)'], title: 'Time to ready', unit: 's', sub: 'Average seconds until a DevWorkspace is ready', div: 1000, digits: 1},
+        {col: 'Create Duration (Avg ms)', alt: ['Create Duration (ms)'], title: 'Create request duration', unit: 'ms', sub: 'Average milliseconds per create call', digits: 1},
         {col: 'CPU Violations', title: 'CPU violations', unit: '', sub: 'Count reported by the run', digits: 0},
         {col: 'Memory Violations', title: 'Memory violations', unit: '', sub: 'Count reported by the run', digits: 0},
-        {col: 'Average Etcd CPU (milliCPU)', title: 'Etcd CPU', unit: 'milliCPU', sub: 'Average milliCPU during the run', digits: 0},
-        {col: 'Average Etcd Memory (MiB)', title: 'Etcd memory', unit: 'MiB', sub: 'Average MiB during the run', digits: 0},
+        {col: 'Average Etcd CPU (milliCPU)', alt: ['Avg Etcd CPU (milliCPU)'], title: 'Etcd CPU', unit: 'milliCPU', sub: 'Average milliCPU during the run', digits: 0},
+        {col: 'Average Etcd Memory (MiB)', alt: ['Avg Etcd Memory (MiB)'], title: 'Etcd memory', unit: 'MiB', sub: 'Average MiB during the run', digits: 0},
         {col: 'Ready Failed (%)', title: 'Failed to become ready', unit: '%', sub: 'Share of DevWorkspaces that never became ready', digits: 2},
       ],
     },
     webhook: {
-      label: 'Webhook', size: 'Users', sizeLabel: 'Concurrent users', sizeNoun: 'users',
+      label: 'Webhook', size: ['Users'], sizeLabel: 'Concurrent users', sizeNoun: 'users',
       metrics: [
         {col: 'Mutating Latency (ms)', title: 'Mutating webhook latency', unit: 'ms', sub: 'Milliseconds, as reported by the run', digits: 0},
         {col: 'Validating Latency (ms)', title: 'Validating webhook latency', unit: 'ms', sub: 'Milliseconds, as reported by the run', digits: 0},
         {col: 'Exec Latency (ms)', title: 'Exec latency', unit: 'ms', sub: 'Milliseconds, as reported by the run', digits: 0},
         {col: 'Create Latency (ms)', title: 'DevWorkspace create latency', unit: 'ms', sub: 'Milliseconds, as reported by the run', digits: 2},
-        {col: 'Mutation Timeouts', title: 'Mutation timeouts', unit: '', sub: 'Count reported by the run', digits: 0},
-        {col: 'Validation Timeouts', title: 'Validation timeouts', unit: '', sub: 'Count reported by the run', digits: 0},
-        {col: 'Exec Failed', title: 'Failed execs', unit: '', sub: 'Count reported by the run', digits: 0},
+        {col: 'Mutation Timeouts', alt: ['Mutation Timeouts 500'], title: 'Mutation timeouts', unit: '', sub: 'Count reported by the run', digits: 0},
+        {col: 'Validation Timeouts', alt: ['Validation Timeouts 500'], title: 'Validation timeouts', unit: '', sub: 'Count reported by the run', digits: 0},
+        {col: 'Exec Failed', alt: ['Exec Failed (due to webhook timeout)'], title: 'Failed execs', unit: '', sub: 'Count reported by the run', digits: 0},
         {col: 'Webhook Restarts', title: 'Webhook server restarts', unit: '', sub: 'Count reported by the run', digits: 0},
         {col: 'Avg Webhook CPU (mCPU)', title: 'Webhook server CPU', unit: 'milliCPU', sub: 'Average milliCPU over the run', digits: 0},
         {col: 'Avg Webhook Mem (MB)', title: 'Webhook server memory', unit: 'MB', sub: 'Average MB over the run', digits: 0},
       ],
     },
     backup: {
-      label: 'Backup', size: 'DW Target', sizeLabel: 'DevWorkspaces targeted', sizeNoun: 'DevWorkspaces',
+      label: 'Backup', size: ['DW Target'], sizeLabel: 'DevWorkspaces targeted', sizeNoun: 'DevWorkspaces',
       group: 'Config Type', groupLabel: 'Config type', prefer: 'openshift-internal',
+      // Older releases named the same two configs differently.
+      groupAlias: {'openshift-internal correct': 'openshift-internal', 'openshift-internal incorrect': 'incorrect'},
       metrics: [
         {col: 'Backup Job Duration (Avg ms)', title: 'Backup job duration', unit: 'ms', sub: 'Average milliseconds per backup job', digits: 0},
         {col: 'Restore Duration (Avg ms)', title: 'Restore duration', unit: 'ms', sub: 'Average milliseconds per restore', digits: 0},
         {col: 'Backup Pods', title: 'Backup pods', unit: '', sub: 'Count reported by the run', digits: 0},
-        {col: 'Backup Failed', title: 'Failed backups', unit: '', sub: 'Count reported by the run', digits: 0},
+        {col: 'Backup Failed', alt: ['Backup Jobs Failed'], title: 'Failed backups', unit: '', sub: 'Count reported by the run', digits: 0},
         {col: 'Restore Failed', title: 'Failed restores', unit: '', sub: 'Count reported by the run', digits: 0},
         {col: 'Average CPU (milliCPU)', title: 'Controller CPU', unit: 'milliCPU', sub: 'Average milliCPU over the run', digits: 0},
-        {col: 'Average Memory (MiB)', title: 'Controller memory', unit: 'MiB', sub: 'Average MiB over the run', digits: 0},
-        {col: 'Average Etcd CPU (milliCPU)', title: 'Etcd CPU', unit: 'milliCPU', sub: 'Average milliCPU during the run', digits: 0},
-        {col: 'Average Etcd Memory (MiB)', title: 'Etcd memory', unit: 'MiB', sub: 'Average MiB during the run', digits: 0},
+        {col: 'Average Memory (MiB)', alt: ['Avg Memory (MiB)'], title: 'Controller memory', unit: 'MiB', sub: 'Average MiB over the run', digits: 0},
+        {col: 'Average Etcd CPU (milliCPU)', alt: ['Avg Etcd CPU (milliCPU)'], title: 'Etcd CPU', unit: 'milliCPU', sub: 'Average milliCPU during the run', digits: 0},
+        {col: 'Average Etcd Memory (MiB)', alt: ['Avg Etcd Memory (MiB)'], title: 'Etcd memory', unit: 'MiB', sub: 'Average MiB during the run', digits: 0},
       ],
     },
   };
@@ -135,17 +137,26 @@ select { background: var(--surface); border: 1px solid var(--axis); border-radiu
     return lines.slice(1).map((r) => Object.fromEntries(lines[0].map((h, i) => [h, r[i] ?? ''])));
   }
 
+  // Run size of a row: the first of the type's size columns that the CSV has.
+  const sizeOf = (t, r) => num(r[t.size.find((c) => c in r)]);
+  // Group of a row (namespace mode, config type), lower-cased so "Single" and "single" are one group,
+  // then mapped through the type's aliases for names that changed between releases.
+  function groupOf(t, r) {
+    const g = (r[t.group] || '').trim().toLowerCase();
+    return (t.groupAlias || {})[g] || g;
+  }
+
   // Rows of one release for the current test type and, where the type has one, the chosen group.
   function rowsOf(release) {
     const t = TYPES[state.type];
-    return release.rows.filter((r) => num(r[t.size]) != null && (!t.group || r[t.group] === state.mode[state.type]));
+    return release.rows.filter((r) => sizeOf(t, r) != null && (!t.group || groupOf(t, r) === state.mode[state.type]));
   }
 
   // Mean of a metric for one release and run size (repeat runs are averaged).
   function value(release, metric, size) {
     const t = TYPES[state.type];
     const vals = rowsOf(release)
-      .filter((r) => num(r[t.size]) === size)
+      .filter((r) => sizeOf(t, r) === size)
       .map((r) => num(r[[metric.col, ...(metric.alt || [])].find((c) => c in r)]))
       .filter((v) => v != null);
     return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length / (metric.div || 1) : null;
@@ -176,7 +187,7 @@ select { background: var(--surface); border: 1px solid var(--axis); border-radiu
 
     $('mode-wrap').hidden = !t.group;
     if (t.group) {
-      const modes = [...new Set(data[state.type].flatMap((r) => r.rows.map((x) => x[t.group]).filter(Boolean)))].sort();
+      const modes = [...new Set(data[state.type].flatMap((r) => r.rows.filter((x) => sizeOf(t, x) != null).map((x) => groupOf(t, x)).filter(Boolean)))].sort();
       if (!modes.includes(state.mode[state.type])) state.mode[state.type] = modes.includes(t.prefer) ? t.prefer : modes[0];
       $('mode-cap').textContent = t.groupLabel;
       segmented($('mode'), 'mode', modes.map((m) => [m, m]), state.mode[state.type], (m) => { state.mode[state.type] = m; render(); });
@@ -192,7 +203,7 @@ select { background: var(--surface); border: 1px solid var(--axis); border-radiu
     $('none').hidden = all.length > 0;
     $('none').textContent = all.length ? '' : `No ${t.label.toLowerCase()} results yet. Add dashboard/results/<release>/${state.type}_load_test_results.csv and push.`;
     const shown = state.last ? all.slice(-state.last) : all;
-    const sizes = [...new Set(shown.flatMap((r) => rowsOf(r).map((x) => num(x[t.size]))))].sort((a, b) => a - b);
+    const sizes = [...new Set(shown.flatMap((r) => rowsOf(r).map((x) => sizeOf(t, x))))].sort((a, b) => a - b);
     const ramp = RAMP[dark.matches ? 'dark' : 'light'];
     // Spread the run sizes evenly over the ramp so the smallest and largest are furthest apart.
     const color = (i) => ramp[sizes.length < 2 ? 4 : Math.round(i * (ramp.length - 1) / (sizes.length - 1))];
