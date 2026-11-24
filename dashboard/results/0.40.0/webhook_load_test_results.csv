@@ -1,0 +1,13 @@
+Users,Create Latency (ms),Exec Attempted,Exec Allowed,Exec Failed (due to webhook timeout),Exec Denied,Exec Latency (ms),Mutating Latency (ms),Validating Latency (ms),Mutation Timeouts 500,Validation Timeouts 500,Webhook Restarts,Avg Webhook CPU (mCPU),Avg Webhook Mem (MB)
+100,5.94,10000,100,0,9900,186.5897,632.035,186.5897,0,0,0,38.586957,29.767238
+200,5.79,40000,200,0,39800,444.740375,1236.925,444.740375,0,0,0,160.209302,74.133448
+300,7.22,90000,300,0,89700,683.0339,1423.775,683.0339,0,0,0,187.960317,105.085069
+400,5.6975,160000,400,37,159563,1085.929787,2247.365,1085.929787,2,37,0,193.126506,113.780826
+500,6.612,250000,500,263,249237,1455.313796,1953.368,1455.313796,4,263,0,196.796117,128.899158
+750,6.673333,562500,707,32859,528934,2891.270948,4045.771333,2891.270948,23,32859,1,198.117057,170.386536
+1000,6.035,352768,256,96547,254965,5278.233637,4451.1875,5278.233637,437,96547,2,196.15,185.875251
+,,,,,,,,,,,,,
+,,,,,,,,,,,,,
+,,,,,,,,,,,,,
+,,,,,,,,,,,,,
+,"According to https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/, default webhook timeout is 10 seconds. If webhook server fails to respond within this time Kubernetes marks request as failed.",,,,,,,,,,,,

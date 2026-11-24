@@ -1,0 +1,13 @@
+Config Type,DW Target,Backup Attempted,Backup Succeeded,Backup Pods,Backup Failed,Backup Job Duration (Avg ms),Restore Attempted,Restore Succeeded,Restore Failed,Restore Duration (Avg ms),Average CPU (milliCPU),Average Memory (MiB),Average Etcd CPU (milliCPU),Average Etcd Memory (MiB)
+external registry correct,250,250,250,250,0,7972,10,10,0,27540.2,20.25,229.077148,176.25,204.803711
+external registry correct,500,500,500,500,0,8146,10,10,0,28542.4,57,201.864397,119.285714,138.353795
+external registry correct,1000,1000,1000,1000,0,7788,10,10,0,27061.7,65.181818,355.926847,166.272727,187.304688
+external registry correct,1500,1510,1122,1508,0,10861.11111,10,10,0,15027.1,88.55,435.354102,241,212.657227
+external registry correct,2000,3812,3812,2809,0,919797.1014,10,10,0,14537.7,48.970874,588.036825,199.427184,273.712341
+external registry correct,2500,2093,2093,2093,0,8074.275362,10,10,0,14526.5,86.363636,556.021662,258.454545,241.088601
+,,,,,,,,,,,,,,
+external registry incorrect,500,1000,0,2000,1000,0,0,0,0,0,50.55,204.571875,259.45,243.227539
+external registry incorrect,1500,1257,0,2514,1257,0,0,0,0,0,33.444444,372.796658,48.333333,152.344401
+external registry incorrect,2000,1718,0,3436,1718,0,0,0,0,0,61.565217,810.290931,322.73913,304.105639
+,,,,,,,,,,,,,,
+openshift-internal correct,1000,1000,1000,1000,0,5410.714286,10,10,0,5010.9,,,0,0
