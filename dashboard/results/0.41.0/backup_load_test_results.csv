@@ -1,0 +1,12 @@
+Config Type,DW Target,Backup Attempted,Backup Succeeded,Backup Pods,Backup Jobs Failed,Backup Job Duration (Avg ms),Restore Attempted,Restore Succeeded,Restore Failed,Restore Duration (Avg ms),Average CPU (milliCPU),Average Memory (MiB),Average Etcd CPU (milliCPU),Average Etcd Memory (MiB)
+openshift-internal correct,250,250,250,250,0,4484,10,10,0,5013,83,126.96875,0,0.769531
+openshift-internal correct,500,500,500,0,0,4370,10,10,0,5011.7,82,212.953125,861,766.28125
+openshift-internal correct,1000,1000,1000,1000,0,119545.4545,10,10,0,5011.3,87.5,385.544922,309.25,425.073242
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,
+openshift-internal incorrect,1000,0,0,35653,8432,0,0,0,0,0,322.377847,160.694239,190.935059,250.320751
+openshift-internal incorrect,1500,0,0,47219,42502,0,0,0,0,0,301.136348,342.271828,178.299862,356.92672
+openshift-internal incorrect,250,0,0,500,250,0,0,0,0,0,167.473538,39.91378,120.275766,350.002339
+openshift-internal incorrect,500,0,0,11761,5908,0,0,0,0,0,287.660338,93.835929,270.543893,423.44053
